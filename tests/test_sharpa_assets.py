@@ -50,6 +50,10 @@ def test_local_model_and_profile(side, combined):
         # The native fingertip local +Z follows the distal segment.
         np.testing.assert_allclose(tip[:3, 2], direction, atol=3e-5)
     if combined:
+        expected_arm_degrees = ([0, 30, -30, 0, 60, 0] if side == 'left'
+                                else [-90, -30, 210, 0, -60, 0])
+        np.testing.assert_allclose(qpos[:6], np.radians(expected_arm_degrees), atol=1e-12)
+        np.testing.assert_array_equal(qpos[6:], np.zeros(22))
         mounts = yaml.safe_load((ROOT / 'configs/sharpa_mounts.yaml').read_text())
         mount = xml.find(f"joint[@name='{side}_sharpa_mount']")
         assert mount.find('parent').get('link') == mounts[side]['parent']

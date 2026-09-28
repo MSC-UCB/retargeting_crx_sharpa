@@ -33,14 +33,14 @@ actuated_joints:
 - left_pinky_MCP_AA
 - left_pinky_PIP
 - left_pinky_DIP
-# Pendant degrees: [0, 30, -60, 0, 60, 90]. ROS J3 = pendant J3 + J2.
+# Pendant degrees: [0, 30, -60, 0, 60, 0]. ROS J3 = pendant J3 + J2.
 initial_qpos:
 - 0
 - 0.5235987755982988
 - -0.5235987755982988
 - 0
 - 1.0471975511965976
-- 1.5707963267948966
+- 0.0
 - 0.0
 - 0.0
 - 0.0

@@ -8,6 +8,22 @@ physical mounts before controlling real hardware.
 The left CRX mount currently rotates the hand 180 degrees about `fanuc_flange`
 Z; the right mount remains at zero rotation.
 
+The CRX + Sharpa initial pose sets both J6 joints to zero. Joint order is J1–J6:
+
+| Convention | Left (degrees) | Right (degrees) |
+| --- | --- | --- |
+| FANUC pendant | 0, 30, -60, 0, 60, 0 | -90, -30, 240, 0, -60, 0 |
+| ROS / URDF | 0, 30, -30, 0, 60, 0 | -90, -30, 210, 0, -60, 0 |
+
+The robot YAML files store ROS angles in radians; all hand joints start at zero.
+Preview uses this configured pose. ROS teleoperation calibrates from measured
+joint feedback and does not automatically move to it. The matching target is in
+`dual_crx_control/scripts/move_to_default_pose.py`; run that separately when a
+move to this pose is intended. Within dual_crx, `config/initial_pose.yaml` now
+supplies the same pose to this script, mock startup and planned-motion scripts.
+Retargeting keeps its own robot YAML files; keep their arm values consistent
+with that ROS-degree config when changing the shared starting pose.
+
 The optimization frame `<side>_retarget_wrist` has the same orientation as the
 native Sharpa wrist: +Z follows extended fingers and +X points out of the palm
 (the flexion direction). This matches the current Quest decoder. Its fixed

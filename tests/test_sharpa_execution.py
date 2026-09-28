@@ -149,11 +149,14 @@ def test_hand_only_mapper_ignores_global_wrist_motion():
         np.testing.assert_array_equal(after.keypoints_wrist, before.keypoints_wrist)
 
 
-def test_combined_initial_wrist_alignment_preserves_measured_orientation():
+@pytest.mark.parametrize('j6_degrees', [(0, 0), (90, -90)])
+def test_combined_initial_wrist_alignment_preserves_measured_orientation(j6_degrees):
     source = SyntheticBimanualInput()
     flow, _ = build_flow(arguments(), with_arms=True, source=source)
     sample = source.read()
-    assert flow.pipeline.initialize(sample, flow.initial_qpos[:28], flow.initial_qpos[28:])
+    seed = flow.initial_qpos.copy()
+    seed[[5, 33]] = np.radians(j6_degrees)
+    assert flow.pipeline.initialize(sample, seed[:28], seed[28:])
     for mapper, hand in ((flow.pipeline.left_mapper, sample.left), (flow.pipeline.right_mapper, sample.right)):
         first = mapper.map(hand)
         np.testing.assert_allclose(first.wrist_pose_world, mapper._robot_initial_wrist_pose, atol=1e-12)
