@@ -86,9 +86,18 @@ def test_quest_decoded_finger_axes_match_sharpa_fk(with_arms, wrist_rotation):
 
 
 @pytest.mark.parametrize('with_arms', [False, True])
-def test_real_solver_smoothing_without_speed_cap_and_finite_input(with_arms, monkeypatch):
+def test_real_solver_smoothing_without_speed_cap_and_finite_input(with_arms, monkeypatch, request):
     source = SyntheticBimanualInput(frames=4, max_age_s=10.)
     flow, _ = build_flow(arguments(), with_arms=with_arms, source=source)
+    request.addfinalizer(flow.close)
+    flow.start_solver()
+    assert len(flow.pair_solver.ready) == 2
+    assert all(worker['maxtime'] == pytest.approx(.030) for worker in flow.pair_solver.ready)
+    assert all(worker['torch_threads'] == 1 for worker in flow.pair_solver.ready)
+    def no_parent_solve(*args, **kwargs):
+        pytest.fail('Sharpa must solve in the worker processes')
+    for retargeter in (flow.pipeline.left_retargeter, flow.pipeline.right_retargeter):
+        monkeypatch.setattr(retargeter, 'solve', no_parent_solve)
     source.open()
     assert flow.command_limiters is None
     assert flow.arm_output_filters is not None and flow.hand_output_filters is not None
@@ -107,7 +116,7 @@ def test_real_solver_smoothing_without_speed_cap_and_finite_input(with_arms, mon
         result = flow.step(source.read())
         assert result is not None and np.isfinite(result.qpos).all()
         for i, r in enumerate((flow.pipeline.left_retargeter, flow.pipeline.right_retargeter)):
-            assert r.optimizer.opt._opt.get_maxtime() == pytest.approx(.025)
+            assert r.optimizer.opt._opt.get_maxtime() == pytest.approx(.030)
             assert r.human_fingertip_indices.tolist() == [4, 8, 12, 16, 20]
             joints = flow.robot_slices[i]
             qpos = result.qpos[joints]
@@ -154,9 +163,11 @@ def test_combined_initial_wrist_alignment_preserves_measured_orientation():
         assert np.linalg.norm(moved.wrist_pose_world[:3, 3] - first.wrist_pose_world[:3, 3]) == pytest.approx(.01)
 
 
-def test_measured_56_dim_seed_pause_and_recovery(monkeypatch):
+def test_measured_56_dim_seed_pause_and_recovery(monkeypatch, request):
     source = SyntheticBimanualInput(max_age_s=10.)
     flow, _ = build_flow(arguments(), with_arms=True, source=source)
+    request.addfinalizer(flow.close)
+    flow.start_solver()
     measured = flow.initial_qpos.copy()
     measured[[0, 28]] += .01
     calls = []
@@ -170,7 +181,7 @@ def test_measured_56_dim_seed_pause_and_recovery(monkeypatch):
 
     monkeypatch.setattr(flow.pipeline, 'step', record_seed)
     backend = NS(get_joint_pos=lambda: measured.copy(), execute=lambda q: calls.append(q.copy()),
-                 pause_tracking=lambda: None, resume_tracking=lambda: False)
+                 pause_tracking=lambda: None, resume_tracking=lambda: False, close=lambda: None)
     flow.backend_factory = lambda: backend
     assert flow.step(source.read()) is None
     result = flow.step(source.read())

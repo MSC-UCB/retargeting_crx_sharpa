@@ -133,8 +133,14 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 SHARPA_ROS_TEST=1 .venv/bin/python -m pytest te
 
 For live Quest input with mock drivers, omit `--synthetic-frames`;
 `--duration 60` sets a finite session. Each side has its own solver, executed
-sequentially, with a 25 ms time budget per side (approximately 50 ms combined,
-plus processing overhead). A solve that exceeds the input freshness threshold
+concurrently in two persistent spawned processes, with a **30 ms time budget per side**.
+Both hand-only and CRX+Sharpa entrypoints use this path in preview and ROS modes;
+CLI arguments are unchanged. Workers build only their own side's model/optimizer,
+use one numerical-library thread each, and start before input acquisition.
+The parent maps each Quest frame, supplies the last valid filtered command as each
+seed, waits for both matching results, and then applies the existing output policy.
+This is not a fixed 60 ms wait, nor a hard 30 ms end-to-end deadline.
+A solve that exceeds the input freshness threshold
 (150 ms by default) can still cause a frame to be dropped. The Sharpa defaults
 apply output smoothing (arm alpha 0.5, hand alpha 0.3) in preview and ROS modes,
 without retargeting-side joint speed limiting. Smoothing is enabled independently
@@ -148,3 +154,19 @@ solve time are reported during execution; topic frequency must be measured under
 solver and viewer load. Mock
 results verify the software path only. Physical control requires confirmed
 mounts, joint mapping, safety setup, and a separate device test.
+
+Worker replies have a 250 ms timeout, independent of the 30 ms NLopt budget;
+the 150 ms input-age check still rejects obsolete completed results. Worker failure,
+timeout, invalid joint positions, or mismatched reply IDs stops the session rather
+than switching to serial solving or publishing a partial pair. Recovery after a
+tracking pause uses fresh measured seeds; no worker command queue is accumulated.
+Timed shutdown cancels a pending wait, and the flow stops output before joining
+workers. Cleanup waits up to 0.5 s for normal exit, then uses terminate/kill if needed.
+On Linux, workers install a parent-death signal so a killed parent cannot leave a
+native solver running. ROS, SDK connections, input devices, and the viewer stay in
+the parent. Callers driving `flow.step()` manually should call `flow.start_solver()`
+before acquiring a sample and always call `flow.close()` in a `finally` block;
+otherwise the first `step()` starts workers and discards that pre-startup sample.
+
+The offline comparison and integration measurements are recorded in the
+[latency investigation](crx-sharpa-teleop-latency-investigation.md).

@@ -2,15 +2,17 @@
 
 調查日期：2026-09-28。依據本機工作樹：`retargeting_crx` HEAD `b22e860`、`dual_crx_control` HEAD `4ab8c85`、`dual_sharpa_wave_ros2` HEAD `09e6feb`。HEAD 僅用於定位版本，實際分析包含當下工作樹內容。
 
+**目前實作已更新：兩支 Sharpa 腳本皆使用雙 process，每側 NLopt 時限 30 ms。** 後文的依序 25 ms 與 thread／process 25 ms 表格保留為修改前調查及原型量測；最新行為與 ROS mock 驗證見「正式流程整合：雙 process／30 ms」。
+
 ## 結論
 
-**目前最有證據的差異是：加入 CRX 後，每側改成手臂與手部一起求解，兩側又依序執行；手指必須等整批求解完成才有新目標。** 本次不連設備的比較中，純雙手求解中位數約 **18.7 ms**，CRX + 雙手約 **39.6 ms**，增加約 **21 ms**；合併模式約 21–23% 的測量樣本超過 20 Hz 對應的 50 ms 預算。
+**原本延遲差異最有證據的來源是：加入 CRX 後，每側改成手臂與手部一起求解，兩側又依序執行；手指必須等整批求解完成才有新目標。** 修改前不連設備的比較中，純雙手求解中位數約 **18.7 ms**，CRX + 雙手約 **39.6 ms**，增加約 **21 ms**；合併模式約 21–23% 的測量樣本超過 20 Hz 對應的 50 ms 預算。
 
 此外，手指指令本身還經過 **20 Hz 更新、alpha=0.3 平滑、50 ms 線性插值，以及 Sharpa SDK 插值／速度設定**。因此 `--publish-hz 100` 代表每 10 ms 發布一次中間值，並不代表每 10 ms 求解一次新手勢。
 
 **手指沒有經過 FANUC 控制器或 CRX 的 Ruckig 插值。** 三個命令 topic 分開發布；CRX 對手指的影響主要是上游求解成本、共用程式資源及回授健康檢查，而不是手指資料繞過手臂控制器。
 
-尚未取得實機時間序列，因此無法宣稱已測出整體延遲、DDS 傳輸延遲或 SDK 內部延遲。本次只新增這份文件，沒有修改控制程式、參數或啟動 ROS／Quest／viewer／硬體。
+後續離線原型已比較雙 thread 與雙 process：雙 process 在保留每側 25 ms 時限時，整批中位數約 21 ms；詳見「雙 process 離線原型結果」。經使用者確認，正式 Sharpa 流程已採雙 process／30 ms，並在沒有硬體的 ROS mock 環境測試；未啟動 Quest、viewer 或實機。尚未取得實機時間序列，因此無法宣稱已測出整體延遲、DDS 傳輸延遲或 SDK 內部延遲。
 
 ## 調查範圍與比較基準
 
@@ -44,9 +46,11 @@ ros2 launch dual_sharpa_wave dual_sharpa.launch.py backend:=sharpa_sdk
 flowchart TD
     Q[Quest Browser WebXR 雙手追蹤] -->|WebSocket JSON /ws；ADB reverse TCP 8765| I[Quest3Receiver：保存最新 frame]
     I --> F[BimanualExecutionFlow：目標 20 Hz]
-    F --> L[左側求解：6 arm + 22 hand]
-    L --> R[右側求解：6 arm + 22 hand]
-    R --> S[輸出平滑：arm 0.5 / hand 0.3]
+    F --> L[左 process：6 arm + 22 hand；30 ms]
+    F --> R[右 process：6 arm + 22 hand；30 ms]
+    L --> J[同一幀左右結果匯合]
+    R --> J
+    J --> S[輸出平滑：arm 0.5 / hand 0.3]
     S --> B[SharpaJointBackend：50 ms 插值；100 Hz timer]
     B -->|JointState：12 joints| A["/crx5ia/joint_targets"]
     B -->|JointState：22 joints| LH["/sharpa/left_hand/joint_command"]
@@ -124,9 +128,9 @@ ROS adapter 只指定 serial，裝置 discovery、實體網路連線與內部排
 
 ### A. 加入手臂後，手指等更久才取得新目標：已由離線比較支持
 
-純雙手每側是 22 維，合併模式每側是 28 維。`BimanualRetargetingPipeline.step()` 先左側 `solve()`，再右側 `solve()`，兩側都完成後才返回。每側是 joint retargeting，沒有獨立的高速手指求解迴圈。
+純雙手每側是 22 維，合併模式每側是 28 維。修改前 `BimanualRetargetingPipeline.step()` 先左側 `solve()`，再右側 `solve()`，兩側都完成後才返回。現在 Sharpa 模式委派兩個 process 平行求解，再匯合返回；每側仍是 joint retargeting，沒有獨立的高速手指求解迴圈。
 
-`build_flow()` 給每側 NLopt `maxtime=0.025` 秒：這是求解器時間預算，不是整批硬性 50 ms 上限，也不是固定等待 25 ms。mapping、Python callback、filter、viewer 等都有額外成本。主迴圈超時後採 `max(原本起點 + period, 現在時間)` 排下一輪，並有 2 ms sleep；不會為維持 20 Hz 補算漏掉的 frame。
+原本 `build_flow()` 給每側 NLopt `maxtime=0.025` 秒，現在是 `0.030` 秒。這是求解器時間預算，不是整批硬性時間上限，也不是固定等待時間。mapping、Python callback、filter、viewer 等都有額外成本。主迴圈超時後採 `max(原本起點 + period, 現在時間)` 排下一輪，並有 2 ms sleep；不會為維持 20 Hz 補算漏掉的 frame。
 
 合併 profile 還增加了世界座標拇指與腕部旋轉目標（左側例：`world_thumb` 0 → 10、`wrist_rotation` 0 → 0.1），所以不只是多傳 12 個數值，優化問題本身也不同。輸出平滑結果會作為下一輪 `previous_qpos`；objective 有對前一姿態的正則化，可能進一步影響快速變化時的收斂與追蹤，需要以真實手勢驗證。
 
@@ -177,7 +181,7 @@ Quest 任一手缺失／沒有新鮮 frame 會進入 hold；恢復要求持續�
 
 每輪均完成 120 commands，`stale=0`。這是直接呼叫 `flow.step()` 的計算耗時，沒有 20 Hz pacing、ROS timer、USB、SDK、機器人或 viewer；**不是實際 command Hz，也不是端到端延遲**。合成資料主要是固定手腕下的手指彎曲，真實手腕移動及追蹤品質會改變結果。
 
-可在 repository 根目錄重現（不連設備）：
+可在 repository 根目錄重跑原本的依序／25 ms 比較（明確停用此測試物件的 process，僅供離線比較）：
 
 ```bash
 env -u PYTHONPATH .venv/bin/python - <<'PY'
@@ -191,6 +195,9 @@ args = SimpleNamespace(config=None, backend='preview', duration=0.,
 for arms in (False, True, True, False):
     source = SyntheticBimanualInput(frames=120)
     flow, _ = build_flow(args, with_arms=arms, source=source)
+    flow.pair_solver = None
+    for retargeter in (flow.pipeline.left_retargeter, flow.pipeline.right_retargeter):
+        retargeter.optimizer.opt._opt.set_maxtime(.025)
     source.open()
     times = []
     try:
@@ -218,7 +225,7 @@ env -u PYTHONPATH .venv/bin/python -m pytest \
 
 ## 平行求解評估與後續時限選擇
 
-**目前決議：後續 thread 平行化先評估每側 35–40 ms 的求解時限；本次只記錄方案，尚未開始實作。** 現有 runtime 仍是左右依序求解、每側 `maxtime=0.025` 秒。35–40 ms 尚未作為實際 runtime 設定測試，也不是已驗證的最佳值。
+**初步 thread 評估決議：每側 35–40 ms 作為候選時限。** 後續在獨立離線原型中比較這兩個值與雙 process，結果見下一節；最後正式整合選擇雙 process／30 ms。35–40 ms 是 thread 階段的候選值，不是目前 runtime 設定，也不是已驗證的實機最佳值。
 
 ### 可平行化的範圍
 
@@ -256,7 +263,130 @@ NLopt 的 `maxtime` 是每個 solver 經過的 wall-clock 時間，不是獨占 
 - 維持最新 frame 語意，不累積舊工作；求解後 freshness 檢查、tracking pause、stop 與錯誤傳遞仍要生效。
 - ROS timer／watchdog 保留原有責任；一側 worker 失敗時不可任意發布另一側未配對的結果。
 
-兩個常駐 process 是另一個候選：各自建立一側 solver，可避開 Python GIL 的共用，但增加初始化、資料傳輸及狀態同步成本；本次未做 process benchmark。若後續比較 process，先保留 25 ms／側重測，再依品質與耗時決定是否提高。無論採用哪種並行方式，hand alpha=0.3 與 50 ms 插值的跟隨滯後仍需另外評估。
+兩個常駐 process 是另一個候選：各自建立一側 solver，可避開 Python GIL 的共用，但增加初始化、資料傳輸及狀態同步成本。初步 thread 階段尚未做 process benchmark；下一節記錄後續以 25 ms／側完成的離線比較。無論採用哪種並行方式，hand alpha=0.3 與 50 ms 插值的跟隨滯後仍需另外評估。
+
+## 雙 process 離線原型結果（2026-09-28）
+
+**原型結果支持選擇兩個常駐 process。** 本節記錄當時每側 25 ms 的獨立 benchmark；後續依使用者要求，以每側 30 ms 接入正式流程。35–40 ms 是 thread 的候選範圍，不需要直接套用到 process。
+
+### 原型與比較方式
+
+原型：[benchmark_sharpa_parallel.py](../scripts/benchmark_sharpa_parallel.py)。左右各一個 `spawn` worker，各自建立 solver，透過獨立 `Pipe` 收取 frame ID、observation、seed 和時限，回傳 qpos、objective、評估次數及 NLopt status。父端同步等待同幀左右結果，一次最多一筆工作／側，沒有跨幀佇列。worker 不建立 ROS node、SDK session 或 viewer。
+
+為沿用正式組合邏輯，每個 worker 初始化時先呼叫既有雙側 composition，再釋放不用的另一側與 flow，只留下該側 solver。這是原型的啟動成本，不是每幀成本。
+
+本機環境為 Python 3.12.3、NumPy 2.5.3、CPU PyTorch 2.14.0、NLopt 2.11.0，可用 CPU affinity 16 個邏輯 CPU。兩組比較分別限制數值函式庫為 1 thread，或保留環境預設（本機 PyTorch intra-op 8、inter-op 16）。每組各兩輪，第二輪反轉 case 順序；每個 case 先跑 20 frame，再量測 100 frame。
+
+資料包含既有合成手指彎曲，加上約 1–1.5 cm 手腕平移與小幅旋轉。先用不設時間上限、維持既有收斂條件的依序求解產生參考，再依原 arm/hand alpha 建立下一幀 seed。所有模式收到**完全相同的 observation 與 seed**，比較的是相同工作，不讓不同模式前一幀的誤差改變下一幀難度。這是受控 replay，不是各模式獨立演進的完整遙操作回放。
+
+`pair_ms` 從派工前量到兩側結果返回，process 包含 IPC；也包含有效性檢查及每側額外一次不求梯度的 objective 評估。後者用於衡量實際回傳的裁切／float32 qpos，不是正式 runtime 的必要步驟。mapping、reference 生成、啟動／關閉、記憶體快照、ROS、viewer 和 20 Hz pacing 均不在 `pair_ms` 內。`budget_ms=0` 僅在 benchmark 表示停用 NLopt maxtime，不是正式 teleop CLI 設定。
+
+### 耗時與收斂結果
+
+下表為數值 thread=1 的兩輪範圍，每個模式共 200 筆量測；RMSE 是相對不設時限參考的 **56 維原始關節角差異**，不是對真實手勢的準確度。
+
+| 模式／每側時限 | 整批 p50 | 整批 p95 | 超過 50 ms | 原始 qpos RMSE |
+| --- | --- | --- | --- | --- |
+| 依序／25 ms | 39.02–39.19 ms | 51.71–51.93 ms | 24/200 | 0.0395–0.0398 rad |
+| 雙 thread／25 ms | 26.63 ms | 26.99–27.12 ms | 0/200 | 0.0773–0.0786 rad |
+| 雙 thread／35 ms | 35.11–35.24 ms | 36.89–36.95 ms | 0/200 | 0.0543–0.0572 rad |
+| 雙 thread／40 ms | 35.09–35.15 ms | 41.83–41.89 ms | 0/200 | 0.0435–0.0450 rad |
+| **雙 process／25 ms** | **20.67–20.84 ms** | **26.34–26.44 ms** | **0/200** | **0.0402–0.0403 rad** |
+| 依序／不設時限 | 39.14–39.20 ms | 60.30–60.64 ms | 28/200 | 0 |
+| 雙 thread／不設時限 | 34.91–34.93 ms | 51.87–52.39 ms | 14/200 | 0 |
+| **雙 process／不設時限** | **20.67–20.82 ms** | **32.12–32.20 ms** | **0/200** | **0** |
+
+雙 process／25 ms 相較依序／25 ms，整批中位數縮短約 47%。每側平均 objective 評估次數約 39.31，與依序約 39.37 接近；碰到 maxtime 的比例約 15–16%，也與依序約 15% 接近。雙 thread／25 ms 則約 31.7–31.9 次，約 83% 求解碰到 maxtime，因此不能只看它的 26.6 ms 就認定品質相當。
+
+不設時限時，三種模式各幀 qpos 與 reference 完全一致，objective 差異為 0，每側平均評估次數 40.48。雙 process 的速度改善因此不只是提早終止求解。此組 process 最慢樣本約 47.9 ms，已接近 50 ms，仍不能拿這組結果當成現場的最壞時間保證。
+
+**時間上限仍會影響個別姿態。** 相對不設時限參考，依序／25 ms 最大單一關節差約 0.843 rad，process／25 ms 約 0.857–0.869 rad；thread／35–40 ms 也有約 0.90–0.99 rad 的個別差異。平均 objective 差很小不代表每個關節都接近；這些是原始求解角差，不是平滑後實機動作。參考解本身也不是動作真值或全域最優保證，後續仍需檢查姿態、任務空間誤差與時序連續性。
+
+### 程序生命週期與資源
+
+保留函式庫預設的第二組比較中，process／25 ms 整批 p50 約 21.10 ms、p95 約 26.29–26.34 ms，仍為 0/200 超過 50 ms；process／不設時限 p50 約 20.98–20.99 ms、p95 約 32.23–32.89 ms，與參考 qpos／objective 仍完全一致。這次小型矩陣工作沒有顯示預設數值 thread 數造成明顯退化；不代表加上 ROS／viewer 或其他 CPU 負載後仍然相同。後續整合可先固定每個 worker 數值 thread=1，減少環境變動。
+
+| 額外成本／清理 | 本次觀察 |
+| --- | --- |
+| 建立兩個 spawn worker 並等 ready | 約 0.999–1.035 秒；不含在每幀耗時 |
+| 正常關閉並回收兩個 worker | 約 0.198–0.206 秒 |
+| 每個 worker 的實際 RSS | 約 358–360 MiB（函式庫預設組，解完 case 後快照） |
+| 每個 worker 的 PSS | 約 261 MiB；共享頁面按使用程序數分攤 |
+| 父程序 + 兩個 worker 合計 PSS | 約 800–813 MiB；相鄰無 worker case 約 368–379 MiB，增加約 432–433 MiB |
+| 兩組效能比較共 16 個 solver worker | 全部 graceful exit、exit code 0、`alive=false`，無需 terminate／kill |
+
+記憶體以 `/proc/<pid>/smaps_rollup` 的當下 RSS/PSS 為準；JSON 的 `peak_rss_mib` 是程序歷史高水位，不可拿來估算新增的實體記憶體，也不可把兩個 worker 的 RSS 直接相加當作獨占記憶體。PSS 比較包含 Python／PyTorch、reference 資料與 benchmark 父程序，不是正式整合的精確記憶體預算。重複 case 的父程序配置快取及資料保留也會影響數字，本次不是長時間記憶體洩漏測試。
+
+原型在正常結束送 stop，限時 `join()`；仍未結束才 `terminate()`，必要時 `kill()`，並再次 join，最後關閉 pipe 與 process handle。單側失敗或等待中 `KeyboardInterrupt` 會清理兩側。worker 在等待下一筆工作時若收到 pipe EOF 會退出。回傳 frame ID 不符則拒絕結果並關閉 worker，不發布未配對資料。
+
+測試：[test_sharpa_parallel_prototype.py](../tests/test_sharpa_parallel_prototype.py)，涵蓋初始化失敗、單側求解例外、程序直接退出、卡住後強制終止、舊 frame、父端 pipe EOF、等待回覆時注入 `KeyboardInterrupt`，以及真正 solver 的三模式一致性和正常退出。
+
+最終檢查：原型與既有 Sharpa／bimanual 相關測試共 **69 passed，無 skip**；27 個文件連結、兩個新 Python 檔的語法、`git diff --check` 均通過。兩份 JSON 共 32 個 case、3,200 筆量測 frame pair，記錄的 16 個效能測試 worker PID 在結束後皆已不存在。
+
+```bash
+env -u PYTHONPATH .venv/bin/python -m pytest \
+  tests/test_sharpa_parallel_prototype.py tests/test_sharpa_execution.py \
+  tests/test_sharpa_interpolation.py tests/test_bimanual_execution.py -q
+```
+
+上述原型只用 EOF 偵測父端中斷，沒有驗證父程序 SIGKILL 或 ROS shutdown；正式整合已另外加入 Linux parent-death signal 及相應測試，見下一節。原型等待回覆 timeout 是 10 秒、正常 close 的等待是 2 秒，屬 benchmark 清理設定，不是正式流程設定。
+
+### 重現與原始資料
+
+從 repository 根目錄執行；`--output` 必須是新檔案，避免覆寫之前結果：
+
+```bash
+env -u PYTHONPATH .venv/bin/python scripts/benchmark_sharpa_parallel.py \
+  --frames 100 --warmup 20 --rounds 2 --native-threads 1 \
+  --output outputs/benchmarks/sharpa_parallel_threads1_repeat.json
+
+env -u PYTHONPATH .venv/bin/python scripts/benchmark_sharpa_parallel.py \
+  --frames 100 --warmup 20 --rounds 2 --native-threads 0 \
+  --output outputs/benchmarks/sharpa_parallel_defaults_repeat.json
+```
+
+本次生成資料為 [限制數值 thread=1](../outputs/benchmarks/sharpa_parallel_20260928_threads1.json) 與 [保留函式庫預設](../outputs/benchmarks/sharpa_parallel_20260928_defaults.json)。JSON 包含逐幀耗時、objective gap、角度差指標、NLopt status、啟動／關閉時間及 worker 回收結果；函式庫預設組另記錄了 RSS/PSS 快照。這些是本機生成量測資料，不是追蹤的 golden fixture。
+
+這些受控原型結果支持 process 的計算收益；各模式獨立演進的序列品質與其他背景負載仍值得追加量測，也不代表已解決 alpha=0.3、50 ms 插值、SDK 或實機通訊造成的延遲。
+
+## 正式流程整合：雙 process／30 ms
+
+`run_sharpa_joint_teleop.py` 與 `run_crx_sharpa_joint_teleop.py` 現在都使用 [BimanualProcessSolver](../src/teleoperation/parallel_solver.py)，preview 與 ROS 模式一致，CLI 不變。左右 worker 各自從四份 typed config 建立該側 Retargeter、Pinocchio model/data 與 NLopt optimizer，每側 `maxtime=0.030` 秒，數值運算 thread 數設為 1。正式 worker 不再像原型先建立完整雙側 flow。
+
+`BimanualExecutionFlow` 是唯一 lifecycle owner：在 `source.open()` 前啟動並等待兩個 worker ready，之後才取得新輸入、建立 backend 及校正。直接呼叫 `flow.step()` 的工具應先 `flow.start_solver()`，並在 finally 呼叫 `flow.close()`；未先啟動時，第一筆 step 只啟動 worker，丟棄啟動前取得的 sample。
+
+父端維持 mapping、量測校正、平滑與發布責任。每次派工都帶新的 request ID、source frame ID，以及父端上一筆有效平滑指令作 seed；`raw` acquisition 物件不傳入 worker。左右結果必須同幀、完整、有限且符合 joint bounds 才返回；求解後仍檢查 150 ms input freshness。丟棄過期結果或追蹤恢復時，下一輪使用父端恢復後的 seed，因此 worker 內前一輪結果不會覆蓋量測／filter 狀態。
+
+| 控制項目 | 正式值／行為 |
+| --- | --- |
+| NLopt 預算 | 30 ms／側，兩個 process 同時運行 |
+| worker ready timeout | 30 秒，發生在輸入／backend 啟動之前 |
+| 整批 worker 回覆 timeout | 250 ms；與 30 ms 求解預算、150 ms freshness 不同 |
+| 命令與 ROS 發布 | 仍為目標 20 Hz 求解、100 Hz 線性插值發布 |
+| filter／interpolation | arm alpha 0.5、hand alpha 0.3、50 ms horizon，維持原設定 |
+| worker 失敗／錯誤結果 | 鎖定失敗並停止 session，不切回依序求解，不發布單側結果 |
+| duration 到期 | 取消等待並停止 backend；已算完但尚未發布的結果仍丟棄 |
+| 正常關閉 | 先停止 backend，再停止／join worker，最後關閉輸入 |
+| worker 回收 | 先等 0.5 秒，必要時 terminate，再必要時 kill；每次強制停止後限時 join |
+| 父程序突然死亡 | Linux `PR_SET_PDEATHSIG=SIGKILL`，並檢查安裝 signal 前的 parent PID 競態 |
+
+正式 worker 是 daemon，但清理不只依賴 daemon：有 stop／join／terminate／kill，也有 Linux parent-death signal。非 Linux 使用父程序 sentinel 監看 thread，沒有宣稱它能中止所有卡住的 native 呼叫。worker 不持有 ROS／SDK 或感測器連線。
+
+使用者授權後已啟動 **ROS mock** 測試：domain 189、localhost discovery、Sharpa `backend:=mock`、CRX `mock:=true input_rate_hz:=100.0`，分別測 linear 與 Ruckig stream，不開 RViz／viewer，不連硬體。
+
+| ROS mock 模式 | 求解目標數 | 命令 topic 實測頻率 | 結果 |
+| --- | --- | --- | --- |
+| 純雙手 | 35 | 左右手均約 100.0 Hz，各 173 筆 publication | 通過 |
+| CRX linear + 雙手 | 35 | 左右手及雙臂均約 100.0 Hz，各 171 筆 publication | 通過 |
+| CRX Ruckig stream + 雙手 | 35 | 左右手及雙臂均約 100.0 Hz，各 171 筆 publication | 通過 |
+
+三個整合情境均通過，檢查 worker 確實為 30 ms、量測與命令維度／跟隨、跨 topic 同 timestamp、pause／resume，以及 ROS feedback thread 和兩個 solver worker 正常關閉。沒有測實體 SDK／馬達延遲。
+
+正式 worker 的 [故障與 lifecycle 測試](../tests/test_parallel_solver.py) 包含單側崩潰／卡住、初始化失敗、錯誤 ID、非法角度、時間到期取消、過期結果的 seed 恢復、輸入啟動失敗、啟動前 sample 丟棄，以及父程序 SIGKILL。Linux parent-death 測試使用 subreaper 回收測試孫程序，避免測試本身留下 zombie；有限幀真實 solver 測試另外確認 worker 先於輸入啟動，結束後正常回收。
+
+完整 headless regression 執行時為 **354 passed、10 skipped、3 failed**。三個失敗均在 `tests/test_crx5ia_leap.py`，對應調查開始前就存在的右側 LEAP URDF `flange_to_leap` 位移修改：`(0.01, -0.03, -0.065)` → `(0.008, -0.04, -0.060)`。未改動或還原這份使用者資產；在 `/tmp` 以 Git 原始 URDF 重驗兩項失敗的 FK 檢查均通過，原始檔 SHA 也符合 manifest。未調整 expected outputs 或降低測試標準。
+
+該次 10 項跳過為 MuJoCo 未安裝的 5 項，以及需要 opt-in ROS 環境的 5 項（CRX-only 3、Sharpa 2）。Sharpa ROS 測試已在 sourced Jazzy 環境另行執行，並再新增、通過 Ruckig mock 情境；本次沒有啟動 CRX-only gateway 或 MuJoCo。後續新增的有限幀 lifecycle 測試也納入最後的 focused regression：process、Sharpa execution／interpolation、bimanual execution 與 package import boundaries 共 **83 passed，無 skip**。Python compileall、文件連結及 `git diff --check` 亦通過。
 
 ## 下一步如何定位實機差異
 
@@ -267,7 +397,7 @@ NLopt 的 `maxtime` 是每個 solver 經過的 wall-clock 時間，不是獨占 
 3. **同時量測命令與回授。** `ros2 topic hz` 只能看訊息到達頻率，即使 100 Hz 正常，也可能一直發相同／緩慢變化的 target。要比較同一關節的 `joint_command.position` 與 `joint_states.position`，用小幅週期動作的相位差或互相關估計「ROS 命令到量測位置」的跟隨時間。這仍包含 SDK、馬達及 feedback 採樣延遲。
 4. **把上游延遲分段。** 若增加量測欄位，記錄 host input receive、左右 solve 起訖、raw/filter target、`backend.execute`、ROS publish、hand callback 開始／SDK 寫入返回及 SDK 讀回時間。現有 command header 是發布時間，無法反推出 Quest frame 的年齡。跨主機須同步時鐘；Browser、host monotonic、ROS clock 不可直接相減。CRX `/crx5ia/interpolated_joint_commands` 診斷訊息使用 monotonic timestamp，也不可直接與 ROS clock header 相減。
 5. **依證據調參。** 若主要是上游 filter，先在 preview／mock 單獨提高 hand alpha，觀察抖動，再單獨縮短 horizon；兩個參數目前都不是手指專用 CLI（horizon 會影響全部 joints）。若要只調 hand alpha，可用 `--config` 的 bimanual `output` 覆寫並保留完整 output 欄位，因目前採淺層 update。若 delay 發生在 `joint_command → joint_states`，再檢查 SDK callback 耗時、插值與速度係數。沒有實測前不建議直接關掉 SDK 插值或提高硬體速度。
-6. **若仍由合併求解主導，評估平行化或降低計算成本。** 已記錄的下一步是左右 thread 平行求解、每側 35–40 ms 候選時限，詳見上一節；尚未實作。將同一側手指與手臂求解／發布排程分離則是更進一步的架構變更，涉及腕部目標耦合、校正和一致性，需要另行設計驗證。單純把 `--command-hz` 改成 100，不會讓約 40–52 ms 的計算塞進 10 ms。
+6. **在雙 process／30 ms 下重新量測。** 現在已整合平行求解；先核對實際 solve time、目標 Hz 與輸出品質，再決定是否降低計算成本。將同一側手指與手臂求解／發布排程分離仍是更進一步的架構變更，涉及腕部目標耦合、校正和一致性，需要另行設計驗證。提高 `--command-hz` 仍不能保證計算能在更短週期內完成。
 
 現場可使用的唯讀檢查例子（需在原本已啟動的 ROS 環境執行）：
 
@@ -290,8 +420,8 @@ ros2 topic hz /crx5ia/joint_targets
 
 | 問題 | 主要來源 |
 | --- | --- |
-| 兩支腳本差異、25 ms 預算、CLI 預設 | [sharpa_teleop.py](../src/retargeting_apps/sharpa_teleop.py)：`build_flow`、`main` |
-| 左右依序求解 | [bimanual.py](../src/teleoperation/bimanual.py)：`BimanualRetargetingPipeline.step` |
+| 兩支腳本差異、30 ms 預算、CLI 預設 | [sharpa_teleop.py](../src/retargeting_apps/sharpa_teleop.py)：`build_flow`、`main` |
+| 左右求解派工與結果匯合 | [bimanual.py](../src/teleoperation/bimanual.py)：`BimanualRetargetingPipeline.step` |
 | 排程、丟棄過期結果、恢復、統計 | [bimanual_execution.py](../src/teleoperation/bimanual_execution.py)：`step`、`run` |
 | alpha 濾波公式 | [output.py](../src/teleoperation/output.py)：`QposOutputFilter.apply` |
 | 兩份平滑設定 | [crx5ia_sharpa_wave.yaml](../configs/bimanual/crx5ia_sharpa_wave.yaml)、[sharpa_wave.yaml](../configs/bimanual/sharpa_wave.yaml) |

@@ -15,8 +15,8 @@ pytestmark = pytest.mark.skipif(os.environ.get('SHARPA_ROS_TEST') != '1',
                                 reason='Set SHARPA_ROS_TEST=1 in a sourced ROS environment')
 
 
-@pytest.mark.parametrize('with_arms', [False, True])
-def test_mock_drivers_receive_solver_commands_and_cleanup(with_arms, monkeypatch, tmp_path):
+@pytest.mark.parametrize('with_arms, arm_method', [(False, None), (True, 'linear'), (True, 'ruckig')])
+def test_mock_drivers_receive_solver_commands_and_cleanup(with_arms, arm_method, monkeypatch, tmp_path):
     import rclpy
     from rclpy.context import Context
     from rclpy.executors import SingleThreadedExecutor
@@ -39,7 +39,7 @@ def test_mock_drivers_receive_solver_commands_and_cleanup(with_arms, monkeypatch
                  'backend:=mock', 'use_rviz:=false', 'publish_rate_hz:=100.0']]
     if with_arms:
         launches.append(['ros2', 'launch', 'dual_crx_control', 'dual_arm.launch.py',
-                         'mock:=true', 'rviz:=false', 'method:=linear', 'input_rate_hz:=100.0'])
+                         'mock:=true', 'rviz:=false', f'method:={arm_method}', 'input_rate_hz:=100.0'])
     processes, logs = [], []
     context = Context()
     rclpy.init(args=[], context=context)
@@ -61,6 +61,9 @@ def test_mock_drivers_receive_solver_commands_and_cleanup(with_arms, monkeypatch
             logs.append(log)
             processes.append(subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
                                               start_new_session=True))
+        flow.start_solver()
+        assert len(flow.pair_solver.ready) == 2
+        assert all(worker['maxtime'] == .030 for worker in flow.pair_solver.ready)
         source.open()
         assert flow.step(source.read()) is None  # connect and seed; no target publication
         assert flow.backend is not None
@@ -97,9 +100,7 @@ def test_mock_drivers_receive_solver_commands_and_cleanup(with_arms, monkeypatch
         assert counts == {topic: len(values) for topic, values in received.items()}
         assert flow.backend.resume_tracking()
     finally:
-        if flow.backend is not None:
-            flow.backend.close()
-        source.close()
+        flow.close()
         executor.shutdown()
         thread.join()
         peer.destroy_node()
@@ -115,3 +116,5 @@ def test_mock_drivers_receive_solver_commands_and_cleanup(with_arms, monkeypatch
         for log in logs:
             log.close()
         assert not any(t.name == 'sharpa_feedback' for t in threading.enumerate())
+        assert len(flow.pair_solver.cleanup) == 2
+        assert all(not p['alive'] and p['exitcode'] == 0 for p in flow.pair_solver.cleanup)

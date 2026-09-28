@@ -57,6 +57,16 @@ class BimanualExecutionFlow:
         self._last_qpos = self.initial_qpos.copy()
         self.command_count = self.stale_count = 0
         self.last_solve_ms = 0.0
+        self.pair_solver = None
+        self._closed = False
+
+    def start_solver(self):
+        """Start optional solver peers before opening input or constructing a backend."""
+        if self._closed:
+            raise RuntimeError('Execution flow is closed')
+        if self.pair_solver is not None:
+            self.pair_solver.start()
+            self.pipeline.pair_solver = self.pair_solver
 
     def _reset_output_filters(self, seed: np.ndarray) -> None:
         """Seed arm and hand smoothing from the current measured robot pose."""
@@ -100,7 +110,13 @@ class BimanualExecutionFlow:
 
     def step(self, sample):
         """Send at most one command for each complete synchronized frame."""
+        if self._closed:
+            raise RuntimeError('Execution flow is closed')
         if self._duration_expired.is_set():
+            return None
+        if self.pair_solver is not None and not self.pair_solver.started:
+            self.start_solver()
+            # Direct step callers must also discard input captured before startup.
             return None
         if not sample.complete or sample.source_index is None:
             self._pause_tracking()
@@ -153,7 +169,14 @@ class BimanualExecutionFlow:
                 self._duration_timer.start()
                 print(f"Quest tracking initialized; automatic stop in {self.duration:g} seconds.", flush=True)
         started = time.monotonic()
-        result = self.pipeline.step(sample)
+        try:
+            result = self.pipeline.step(sample)
+        except RuntimeError:
+            if self._duration_expired.is_set():
+                return None
+            if self.pair_solver is not None and self.backend is not None:
+                self.backend.request_stop('Parallel retargeting solver failed')
+            raise
         self.last_solve_ms = (time.monotonic() - started) * 1000.0
         self.last_sequence = sample.source_index
         if result is None or self._duration_expired.is_set():
@@ -200,11 +223,14 @@ class BimanualExecutionFlow:
     def _expire_duration(self):
         # Independent of the solver loop: request stop even if a solve is slow.
         self._duration_expired.set()
+        if self.pair_solver is not None:
+            self.pair_solver.cancel()
         if self.backend is not None:
             self.backend.request_stop("Quest session duration reached")
 
     def run(self):
         try:
+            self.start_solver()
             self.source.open()
             next_command = time.monotonic()
             last_report = 0.
@@ -236,11 +262,22 @@ class BimanualExecutionFlow:
                     last_report = now
                 time.sleep(.002)
         finally:
-            if self._duration_timer is not None:
-                self._duration_timer.cancel()
-                self._duration_timer.join()
+            self.close()
+
+    def close(self):
+        """Stop output first; always reap solver processes and close acquisition."""
+        if self._closed:
+            return
+        self._closed = True
+        if self._duration_timer is not None:
+            self._duration_timer.cancel()
+            self._duration_timer.join()
+        try:
+            if self.backend is not None:
+                self.backend.close()
+        finally:
             try:
-                if self.backend is not None:
-                    self.backend.close()
+                if self.pair_solver is not None:
+                    self.pair_solver.close()
             finally:
                 self.source.close()

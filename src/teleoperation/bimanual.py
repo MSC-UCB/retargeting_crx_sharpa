@@ -48,6 +48,7 @@ class BimanualRetargetingPipeline:
         self.right_mapper = right_mapper
         self.left_retargeter = left_retargeter
         self.right_retargeter = right_retargeter
+        self.pair_solver = None  # Optional peer owned and started by the execution flow.
         self._initialized = False
 
     @property
@@ -92,8 +93,13 @@ class BimanualRetargetingPipeline:
             keypoint_2d=right.keypoint_2d,
             raw=right.raw,
         )
-        left_result = self.left_retargeter.solve(left, previous_qpos=self.left_retargeter.previous_qpos)
-        right_result = self.right_retargeter.solve(right, previous_qpos=self.right_retargeter.previous_qpos)
+        if self.pair_solver is None:
+            left_result = self.left_retargeter.solve(left, previous_qpos=self.left_retargeter.previous_qpos)
+            right_result = self.right_retargeter.solve(right, previous_qpos=self.right_retargeter.previous_qpos)
+        else:
+            left_result, right_result = self.pair_solver.solve(
+                (left, right), (self.left_retargeter.previous_qpos, self.right_retargeter.previous_qpos),
+                frame_id=sample.source_index)
         self.left_retargeter.previous_qpos = left_result.qpos.copy()
         self.right_retargeter.previous_qpos = right_result.qpos.copy()
         return BimanualRetargetedFrame(

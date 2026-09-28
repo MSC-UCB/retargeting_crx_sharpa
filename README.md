@@ -42,6 +42,9 @@ interpolation; both Sharpa entrypoints use linear interpolation by default.
 Configure the CRX driver with `input_rate_hz:=100.0`; Sharpa uses its 100 Hz
 driver update rate. Existing output smoothing is retained. The Sharpa modes
 keep arm smoothing at 0.5, hand smoothing at 0.3, and joint speed limiting disabled.
+Both Sharpa entrypoints solve the left and right sides in two persistent processes,
+with a 30 ms NLopt time budget per side. Worker startup precedes input acquisition;
+the flow owns cancellation and process cleanup. Command and publication rates are unchanged.
 
 For a virtual Sharpa preview, follow the steps below. Preview updates at the
 solver rate; the 100 Hz publisher runs in ROS mode. See the

@@ -11,6 +11,7 @@ def build_flow(args, *, with_arms, source=None):
     from retargeting_apps.composition import build_bimanual_execution_flow
     from retargeting_apps.main import compose_hydra_base_config
     from teleoperation.backends.sharpa_contract import joint_channels
+    from teleoperation.parallel_solver import BimanualProcessSolver
 
     name = 'crx5ia_sharpa_wave' if with_arms else 'sharpa_wave'
     config = compose_hydra_base_config([
@@ -20,8 +21,8 @@ def build_flow(args, *, with_arms, source=None):
     if args.config:
         config['bimanual'].update(load_config_source(args.config))
     config['bimanual']['duration'] = args.duration
-    # Two sequential solves share an approximately 50 ms budget (25 ms per side).
-    config['solver']['params']['maxtime'] = 0.025
+    # Independent processes solve the two sides concurrently, 30 ms per side.
+    config['solver']['params']['maxtime'] = 0.030
     config['backend']['command_hz'] = args.command_hz
     config['input'].update(adb=args.adb, serial=args.serial)
     config['viewer'].update(enabled=args.viewer, port=args.viewer_port, wait_for_client=False)
@@ -33,6 +34,7 @@ def build_flow(args, *, with_arms, source=None):
         raise ValueError('Selected profiles do not match the script arm/hand mode')
     if flow.arm_dofs != ((6, 6) if with_arms else (0, 0)):
         raise ValueError('Profile arm_dof does not match the selected Sharpa mode')
+    flow.pair_solver = BimanualProcessSolver(retargeters, timeout=flow.timeout)
     if args.backend == 'ros':
         from retargeting_ros.sharpa_joint import SharpaJointBackend
 
@@ -100,7 +102,8 @@ def main(argv=None, *, with_arms=True):
         if args.viewer:
             from retargeting_apps.visualization.execution.manager import create_optional_execution_visualizer
             visualizer = create_optional_execution_visualizer(config, flow)
-        print(f'Sharpa {"arms + hands" if with_arms else "hands only"}; backend={args.backend}', flush=True)
+        print(f'Sharpa {"arms + hands" if with_arms else "hands only"}; backend={args.backend}; '
+              'two solver processes, 30 ms per side', flush=True)
         flow.run()
     except KeyboardInterrupt:
         pass
