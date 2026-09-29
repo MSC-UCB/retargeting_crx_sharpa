@@ -13,7 +13,8 @@ class BimanualExecutionFlow:
                  arm_output_filters: tuple[QposOutputFilter, QposOutputFilter] | None = None,
                  hand_output_filters: tuple[QposOutputFilter, QposOutputFilter] | None = None,
                  robot_dofs=(22, 22), arm_dofs=(6, 6),
-                 command_limiters: tuple[QposCommandLimiter, QposCommandLimiter] | None = None):
+                 command_limiters: tuple[QposCommandLimiter, QposCommandLimiter] | None = None,
+                 stop_gesture=None):
         if not np.isfinite(command_hz) or command_hz <= 0:
             raise ValueError("command_hz must be positive")
         if not np.isfinite(duration) or duration < 0:
@@ -59,6 +60,45 @@ class BimanualExecutionFlow:
         self.last_solve_ms = 0.0
         self.pair_solver = None
         self._closed = False
+        self.stop_gesture = stop_gesture
+        self.stop_latched = threading.Event()
+        self.stop_reason = None
+        self.stop_observer = None
+        self._last_stop_report = None
+
+    def latch_gesture_stop(self):
+        """Gate output before cancelling workers; never resume this session."""
+        if self.stop_latched.is_set():
+            return
+        self.stop_latched.set()
+        self.stop_reason = 'Dual thumb/ring pinch'
+        try:
+            if self.backend is not None:
+                self.backend.request_stop(self.stop_reason)
+        finally:
+            if self.pair_solver is not None:
+                self.pair_solver.cancel()
+
+    def _check_stop_gesture(self, sample=None):
+        if self.stop_gesture is None:
+            return False
+        now = time.monotonic()
+        detector = self.stop_gesture
+        if sample is None:
+            detector.poll(now)
+        else:
+            detector.update(sample, now)
+        if detector.latched:
+            self.latch_gesture_stop()
+            report = (detector.state, min(int(detector.elapsed*4), int(detector.config.hold_s*4)))
+            if report != self._last_stop_report:
+                self._last_stop_report = report
+                message = (f'{detector.state}: {detector.elapsed:.2f}/{detector.config.hold_s:g}s; '
+                           f'{detector.reason}. New motion targets disabled; robot standstill not verified.')
+                print(message, flush=True)
+                if self.stop_observer is not None:
+                    self.stop_observer(message)
+        return detector.latched
 
     def start_solver(self):
         """Start optional solver peers before opening input or constructing a backend."""
@@ -114,6 +154,8 @@ class BimanualExecutionFlow:
             raise RuntimeError('Execution flow is closed')
         if self._duration_expired.is_set():
             return None
+        if self._check_stop_gesture(sample) or self.stop_latched.is_set():
+            return None
         if self.pair_solver is not None and not self.pair_solver.started:
             self.start_solver()
             # Direct step callers must also discard input captured before startup.
@@ -138,7 +180,7 @@ class BimanualExecutionFlow:
                 if self.backend.resume_tracking() is False:
                     self._recovery_started = None
                     return None
-            if self._duration_expired.is_set():
+            if self._duration_expired.is_set() or self.stop_latched.is_set():
                 return None
             # Resume setup can block: calibrate using a NEW sample on the next tick.
             self.pipeline.reset()
@@ -172,14 +214,14 @@ class BimanualExecutionFlow:
         try:
             result = self.pipeline.step(sample)
         except RuntimeError:
-            if self._duration_expired.is_set():
+            if self._duration_expired.is_set() or self.stop_latched.is_set():
                 return None
             if self.pair_solver is not None and self.backend is not None:
                 self.backend.request_stop('Parallel retargeting solver failed')
             raise
         self.last_solve_ms = (time.monotonic() - started) * 1000.0
         self.last_sequence = sample.source_index
-        if result is None or self._duration_expired.is_set():
+        if result is None or self._duration_expired.is_set() or self.stop_latched.is_set():
             return None
         # Never refresh an obsolete input into a new ROS command after a slow solve.
         received_ns = getattr(getattr(sample.left, "raw", None), "received_monotonic_ns", None)
@@ -195,9 +237,11 @@ class BimanualExecutionFlow:
                 self._pause_tracking()
                 return None
             try:
+                if self.stop_latched.is_set() or self._duration_expired.is_set():
+                    return None
                 self.backend.execute(result.qpos)
             except RuntimeError:
-                if self._duration_expired.is_set():
+                if self._duration_expired.is_set() or self.stop_latched.is_set():
                     return None
                 if hasattr(self.backend, 'assert_tracking') and self.backend.assert_tracking() is False:
                     self._pause_tracking()
@@ -239,7 +283,11 @@ class BimanualExecutionFlow:
                 if self._duration_expired.is_set():
                     print("Quest session duration reached; stopping teleoperation.", flush=True)
                     return
-                if self.backend is not None and self.started_at is not None:
+                self._check_stop_gesture()
+                if self.stop_gesture is not None and self.stop_gesture.finished:
+                    return
+                if (not self.stop_latched.is_set()
+                        and self.backend is not None and self.started_at is not None):
                     if now - self.started_at > .5:
                         if self.backend.assert_tracking() is False and not self.tracking_paused:
                             self._pause_tracking()
@@ -250,6 +298,8 @@ class BimanualExecutionFlow:
                     try:
                         sample = self.source.read()
                     except StopIteration:
+                        if self.stop_gesture is not None and self.stop_latched.is_set():
+                            self.stop_gesture.interrupt('Input exhausted during confirmation')
                         return
                     self.step(sample)
                     next_command = max(now + self.period, time.monotonic())

@@ -5,6 +5,11 @@ import math
 
 
 def build_flow(args, *, with_arms, source=None):
+    gesture = getattr(args, 'stop_gesture', 'none')
+    if gesture not in ('none', 'dual-thumb-ring-pinch'):
+        raise ValueError('Unknown stop gesture')
+    if gesture != 'none' and (not with_arms or source is not None):
+        raise ValueError('Stop gesture is supported only by CRX + Sharpa with live Quest input')
     import numpy as np
 
     from retargeting.config.io import load_config_source
@@ -27,6 +32,12 @@ def build_flow(args, *, with_arms, source=None):
     config['input'].update(adb=args.adb, serial=args.serial)
     config['viewer'].update(enabled=args.viewer, port=args.viewer_port, wait_for_client=False)
     flow = build_bimanual_execution_flow(config, source=source)
+    if gesture != 'none':
+        from teleoperation.stop_gesture import GestureStopDetector, StopGestureConfig
+
+        flow.stop_gesture = GestureStopDetector(StopGestureConfig(hold_s=args.stop_gesture_hold_s))
+        if flow.period >= flow.stop_gesture.config.max_gap_s:
+            raise ValueError('Stop gesture requires command-hz above 6.67 for fresh confirmation')
     retargeters = (flow.pipeline.left_retargeter, flow.pipeline.right_retargeter)
     names = tuple(tuple(r.robot_config.actuated_joints) for r in retargeters)
     channels = joint_channels(names)
@@ -52,6 +63,7 @@ def build_flow(args, *, with_arms, source=None):
             startup_timeout=args.startup_timeout, target_timeout=flow.timeout,
             publish_hz=publish_hz, interpolation_horizon=horizon,
             crx_namespace=args.crx_namespace, sharpa_namespace=args.sharpa_namespace,
+            require_waypoint=gesture != 'none',
         )
     return flow, config
 
@@ -76,8 +88,12 @@ def main(argv=None, *, with_arms=True):
     parser.add_argument('--sharpa-namespace', default='sharpa')
     parser.add_argument('--synthetic-frames', type=int, default=None,
                         help='Explicit finite smoke input instead of opening Quest (use ROS mock only)')
+    parser.add_argument('--stop-gesture', choices=('none', 'dual-thumb-ring-pinch'), default='none',
+                        help='Opt-in latched stop; live CRX + Sharpa Quest only, ROS requires Ruckig waypoint')
+    parser.add_argument('--stop-gesture-hold-s', type=float, default=2.,
+                        help='Fresh bilateral pinch confirmation duration after output is latched (default: 2)')
     args = parser.parse_args(argv)
-    for name in ('command_hz', 'startup_timeout', 'publish_hz'):
+    for name in ('command_hz', 'startup_timeout', 'publish_hz', 'stop_gesture_hold_s'):
         if not math.isfinite(getattr(args, name)) or getattr(args, name) <= 0:
             parser.error(f'{name} must be finite and positive')
     if args.interpolation_horizon_ms is not None and (
@@ -91,26 +107,51 @@ def main(argv=None, *, with_arms=True):
         parser.error('synthetic-frames must be positive')
     if not args.crx_namespace.strip('/') or not args.sharpa_namespace.strip('/'):
         parser.error('Namespaces cannot be empty')
+    if args.stop_gesture != 'none':
+        if not with_arms or args.synthetic_frames is not None:
+            parser.error('Stop gesture requires CRX + Sharpa live Quest input')
+        if args.command_hz <= 1/.15:
+            parser.error('Stop gesture requires command-hz above 6.67')
     source = None
     if args.synthetic_frames is not None:
         from teleoperation.inputs.synthetic_hand import SyntheticBimanualInput
         source = SyntheticBimanualInput(args.synthetic_frames)
         print('Synthetic smoke input selected; this does not validate Quest tracking.', flush=True)
-    flow, config = build_flow(args, with_arms=with_arms, source=source)
-    visualizer = None
+    flow = visualizer = None
     try:
+        flow, config = build_flow(args, with_arms=with_arms, source=source)
         if args.viewer:
             from retargeting_apps.visualization.execution.manager import create_optional_execution_visualizer
             visualizer = create_optional_execution_visualizer(config, flow)
+            if flow.stop_gesture is not None and visualizer is not None:
+                status = visualizer.server.gui.add_markdown('Stop gesture ready: pinch both thumbs to ring fingers.')
+                flow.stop_observer = lambda message: setattr(status, 'content', message)
         print(f'Sharpa {"arms + hands" if with_arms else "hands only"}; backend={args.backend}; '
               'two solver processes, 30 ms per side', flush=True)
+        if flow.stop_gesture is not None:
+            print(f'Stop gesture enabled: pinch each thumb to its ring fingertip for '
+                  f'{args.stop_gesture_hold_s:g}s. Output latches immediately; release will not resume. '
+                  'This is a software session stop, not an emergency stop.', flush=True)
         flow.run()
+        if flow.stop_gesture is not None and flow.stop_gesture.latched:
+            if flow.stop_gesture.state == 'EXIT_CONFIRMED':
+                return 0
+            print(f'Gesture confirmation interrupted: {flow.stop_gesture.reason}', flush=True)
+            return 2
+        return 0
     except KeyboardInterrupt:
-        pass
+        return 130
+    except (RuntimeError, ValueError, ImportError) as exc:
+        print(f'Sharpa teleoperation failed: {exc}', flush=True)
+        return 1
     finally:
-        if visualizer is not None:
-            visualizer.close()
+        try:
+            if flow is not None:
+                flow.close()
+        finally:
+            if visualizer is not None:
+                visualizer.close()
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

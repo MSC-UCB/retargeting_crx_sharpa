@@ -1,5 +1,14 @@
 # Sharpa Wave preview and mock validation
 
+The CRX + Sharpa live Quest entrypoint supports an opt-in stop gesture:
+add `--stop-gesture dual-thumb-ring-pinch --stop-gesture-hold-s 2`.
+Pinch each thumb to its ring fingertip on both hands. The first bilateral
+candidate latches output immediately; holding for two seconds confirms exit.
+Releasing after the latch exits without resuming. ROS requires verified CRX
+`method=ruckig` and `ruckig_target_mode=waypoint`; other modes are rejected
+before any command publication. See [停止手勢操作與驗證](../stop_gesture.md)
+for the command, behavior, and current hardware-validation limits.
+
 The CRX + Sharpa scene uses `configs/bimanual/crx5ia_sharpa_wave.yaml`.
 The hand-only scene uses `configs/bimanual/sharpa_wave.yaml`. Both use the same
 local Sharpa models as the ROS execution scripts. The flange transforms in

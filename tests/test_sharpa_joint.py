@@ -177,3 +177,28 @@ def test_close_is_idempotent_and_does_not_shutdown_global_ros(backend):
     b.close()
     assert closed == ['timer', 'executor', 'thread', 'node', 'context']
     assert all(len(msgs) == 1 for msgs in b.sent.values())
+
+
+def test_cleanup_failure_still_closes_other_ros_resources(backend):
+    b, closed = backend, []
+    ready(b)
+    def fail():
+        closed.append('executor')
+        raise RuntimeError('executor shutdown failed')
+    b._watchdog = None
+    b._executor = NS(shutdown=fail)
+    b._thread.join = lambda: closed.append('thread')
+    b._node.destroy_node = lambda: closed.append('node')
+    b._context.try_shutdown = lambda: closed.append('context')
+    with pytest.raises(RuntimeError, match='shutdown failed'):
+        b.close()
+    assert closed == ['executor', 'thread', 'node', 'context']
+    assert b._closed and b._stopped
+
+
+def test_gesture_does_not_report_success_after_executor_failure(backend):
+    backend._require_waypoint = True
+    backend._stopped = True
+    backend._spin_error = 'executor failed'
+    with pytest.raises(RuntimeError, match='executor failed'):
+        backend.request_stop('gesture')

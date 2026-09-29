@@ -188,3 +188,66 @@ def test_interpolator_keeps_configured_dimension_for_future_targets(size):
         curve.set_target(np.zeros(size + 1), 1., .05, 1.)
     curve.set_target(np.ones(size), 1., .05, 1.)
     np.testing.assert_allclose(curve.sample(1.025), .5)
+
+
+def test_gesture_stop_is_final_and_holds_only_once(timed_backend):
+    b, now = timed_backend
+    b._require_waypoint = True
+    b.execute(np.ones(b._size))
+    b.request_stop('gesture')
+    b.request_stop('gesture again')
+    assert not b.resume_tracking()
+    with pytest.raises(RuntimeError, match='stopped'):
+        b.execute(np.ones(b._size))
+    b.close()
+    assert all(len(messages) == 1 for messages in b.sent.values())
+    assert b._output_timer.canceled and b._pending_target is None
+
+
+def test_unverified_startup_cleanup_cannot_publish_hold(timed_backend):
+    b, _ = timed_backend
+    b._output_armed = False
+    b.close()
+    assert all(not messages for messages in b.sent.values())
+
+
+def test_failed_gesture_hold_still_revokes_pending_output(timed_backend):
+    b, now = timed_backend
+    b._require_waypoint = True
+    b.execute(np.ones(b._size))
+    b._feedback['right_hand']['error'] = 'feedback lost'
+    with pytest.raises(RuntimeError, match='feedback lost'):
+        b.request_stop('gesture')
+    assert b._stopped and b._output_timer.canceled and b._pending_target is None
+    b._publish_tick()
+    with pytest.raises(RuntimeError, match='feedback lost'):
+        b.close()
+    assert all(not messages for messages in b.sent.values())
+
+
+def test_stop_from_another_thread_discards_sample_in_flight(timed_backend):
+    import threading
+
+    b, now = timed_backend
+    b._require_waypoint = True
+    b.execute(np.ones(b._size))
+    sampling, release = threading.Event(), threading.Event()
+    sample = b._interpolator.sample
+    def blocked_sample(t):
+        sampling.set()
+        assert release.wait(2)
+        return sample(t)
+
+    b._interpolator.sample = blocked_sample
+    now[0] = 10.01
+    thread = threading.Thread(target=b._publish_tick)
+    thread.start()
+    try:
+        assert sampling.wait(2)
+        b.request_stop('gesture')
+    finally:
+        release.set()
+        thread.join(2)
+    assert not thread.is_alive()
+    assert b._publish_count == 0
+    assert all(len(messages) == 1 for messages in b.sent.values())

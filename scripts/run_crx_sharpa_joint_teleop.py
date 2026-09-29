@@ -4,4 +4,4 @@ from retargeting_apps.sharpa_teleop import main
 
 
 if __name__ == '__main__':
-    main(with_arms=True)
+    raise SystemExit(main(with_arms=True))

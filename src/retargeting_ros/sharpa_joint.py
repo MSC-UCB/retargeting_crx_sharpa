@@ -14,7 +14,7 @@ class SharpaJointBackend:
     def __init__(self, *, robot_names, initial_qpos, lower, upper, control_period,
                  startup_timeout=5., feedback_timeout=.5, target_timeout=.25,
                  publish_hz=None, interpolation_horizon=None,
-                 crx_namespace='crx5ia', sharpa_namespace='sharpa'):
+                 crx_namespace='crx5ia', sharpa_namespace='sharpa', require_waypoint=False):
         self.channels = joint_channels(robot_names)
         self._size = sum(map(len, robot_names))
         self.lower, self.upper = np.asarray(lower), np.asarray(upper)
@@ -44,6 +44,9 @@ class SharpaJointBackend:
         self._closed = self._stopped = self._paused = False
         self._last_command_at = None
         self._spin_error = None
+        self._stop_error = None
+        self._output_armed = False
+        self._require_waypoint = require_waypoint
         self._feedback = {key: dict(stamp=0, received=0., advanced=0., error='waiting for feedback')
                           for key in self.channels}
         self._publishers = {}
@@ -79,6 +82,10 @@ class SharpaJointBackend:
             self._thread = threading.Thread(target=self._spin, daemon=True, name='sharpa_feedback')
             self._thread.start()
             deadline = time.monotonic() + startup_timeout
+            if require_waypoint:
+                if 'arms' not in self.channels:
+                    raise ValueError('Gesture stop requires CRX arm channels')
+                self._verify_waypoint(crx_namespace, deadline)
             while True:
                 try:
                     with self._lock:
@@ -99,9 +106,41 @@ class SharpaJointBackend:
             self._node.get_logger().info(
                 'Sharpa output: ' + ('direct solver targets' if publish_hz is None else
                 f'{publish_hz:g} Hz linear interpolation; horizon {horizon * 1000:g} ms'))
+            self._output_armed = True
         except BaseException:
             self.close()
             raise
+
+    def _verify_waypoint(self, namespace, deadline):
+        """Read the driver's immutable mode before any command (including hold)."""
+        from rcl_interfaces.srv import GetParameters
+
+        client = self._node.create_client(
+            GetParameters, f'/{namespace.strip("/")}/joint_interpolation/get_parameters')
+        future = None
+        try:
+            while not client.wait_for_service(timeout_sec=max(0., min(.05, deadline-time.monotonic()))):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('Gesture stop: CRX parameter service unavailable')
+            future = client.call_async(GetParameters.Request(names=['method', 'ruckig_target_mode']))
+            while not future.done():
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('Gesture stop: CRX mode query timed out')
+                time.sleep(.005)
+            self._check_waypoint_response(future.result())
+            self._node.get_logger().info('Gesture stop: CRX ruckig/waypoint verified')
+        finally:
+            if future is not None and not future.done():
+                future.cancel()
+            self._node.destroy_client(client)
+
+    @staticmethod
+    def _check_waypoint_response(response):
+        values = getattr(response, 'values', ())
+        # ParameterType.PARAMETER_STRING == 4; keep validation ROS-independent.
+        if (len(values) != 2 or any(v.type != 4 for v in values)
+                or [v.string_value for v in values] != ['ruckig', 'waypoint']):
+            raise RuntimeError('Gesture stop requires CRX method=ruckig, ruckig_target_mode=waypoint')
 
     def _validate_command(self, qpos):
         values = np.asarray(qpos, dtype=float)
@@ -271,16 +310,20 @@ class SharpaJointBackend:
                                      diagnostics={'targets': self._target_count,
                                                   'publications': self._publish_count})
 
-    def _pause_locked(self):
+    def _pause_locked(self, *, strict=False):
         if self._paused:
             return
         self._paused = True
         self._reset_output_locked(self._actual)
+        if not getattr(self, '_output_armed', True):
+            return
         try:
             self._check_feedback()
             self._publish(self._actual)  # One measured hold target, never a repeated stale goal.
             self._target = self._actual.copy()
         except (RuntimeError, ValueError):
+            if strict:
+                raise
             pass  # Missing feedback: stop sending; drivers own their timeout policy.
 
     def _watchdog_tick(self):
@@ -324,22 +367,50 @@ class SharpaJointBackend:
 
     def request_stop(self, reason):
         with self._lock:
-            self._pause_locked()
-            self._stopped = True
+            if self._stopped:
+                if getattr(self, '_require_waypoint', False) and self._spin_error:
+                    raise RuntimeError(f'Gesture stop: ROS executor failed: {self._spin_error}')
+                return
+            try:
+                # Gesture sessions must report inability to deliver the hold.
+                if getattr(self, '_require_waypoint', False):
+                    self._check_feedback()
+                self._pause_locked(strict=getattr(self, '_require_waypoint', False))
+            except Exception as exc:
+                self._stop_error = str(exc)
+                raise
+            finally:
+                self._stopped = True
+                self._reset_output_locked(self._last_published)
 
     def close(self):
         with self._lock:
             if self._closed:
                 return
-            self._pause_locked()
-            self._closed = self._stopped = True
-            if self._watchdog is not None:
-                self._watchdog.cancel()
-        if self._executor is not None:
-            self._executor.shutdown()
-        if self._thread is not None:
-            self._thread.join()
-        if self._node is not None:
-            self._node.destroy_node()
-        if self._context is not None:
-            self._context.try_shutdown()
+            self._closed = True
+        try:
+            with self._lock:
+                try:
+                    self._pause_locked()
+                finally:
+                    self._stopped = True
+                    if self._watchdog is not None:
+                        self._watchdog.cancel()
+        finally:
+            try:
+                if self._executor is not None:
+                    self._executor.shutdown()
+            finally:
+                try:
+                    if self._thread is not None:
+                        self._thread.join()
+                finally:
+                    try:
+                        if self._node is not None:
+                            self._node.destroy_node()
+                    finally:
+                        if self._context is not None:
+                            self._context.try_shutdown()
+        error = getattr(self, '_stop_error', None) or self._spin_error
+        if getattr(self, '_require_waypoint', False) and error:
+            raise RuntimeError(f'Gesture session stop failed: {error}')
