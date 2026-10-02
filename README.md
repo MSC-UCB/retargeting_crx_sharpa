@@ -451,7 +451,8 @@ mapping lives in `teleoperation.backends.dual_crx_contract`. The unused duplicat
 publishers, COACT placeholder path, LEAP-only backend and synthetic bimanual
 trajectory demo have been removed. The static initial-pose viewer is retained.
 See [configuration and development](docs/configuration-and-development.md) for
-other workflows, and [reorganized.md](reorganized.md) for the design and migration map.
+other workflows. The design and migration notes are retained locally in
+`reorganized.md`, which is not tracked in Git.
 
 ## Citation
 
