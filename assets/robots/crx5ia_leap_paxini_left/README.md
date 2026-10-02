@@ -19,7 +19,8 @@ resulting translation is `[0.037336626243399, 0.047897767636037,
 0.140188227821871]` metres with RPY `[0, -1.56, 0]`. The left CRX home is
 configured separately from the right CRX home in
 `configs/robots/crx5ia_leap_paxini_left.yaml`; its current arm vector is
-`[0, 0, 0, 0, -90, 0]` degrees. The left mount is deliberately independent of
+`[0, 30, -30, 0, 60, 0]` in ROS / URDF degrees, matching CRX + Sharpa and
+`dual_crx_control/config/initial_pose.yaml`. The left mount is deliberately independent of
 the right-hand 180-degree remount and of the J6 home value.
 
 ## Mount orientation and physical validation

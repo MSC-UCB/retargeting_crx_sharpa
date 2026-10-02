@@ -116,8 +116,8 @@ def test_bimanual_leap_config_uses_left_dual_crx_home_and_22_dof_each():
     right = load_robot_config(config["right"]["robot"])
 
     assert len(left.actuated_joints) == len(right.actuated_joints) == 22
-    np.testing.assert_allclose(left.initial_qpos[:6], [0.0, 0.0, 0.0, 0.0, -np.pi / 2, 0.0])
-    np.testing.assert_allclose(right.initial_qpos[:6], [-np.pi / 2, 0.0, np.pi, 0.0, np.pi / 2, 0.0])
+    np.testing.assert_allclose(left.initial_qpos[:6], np.radians([0, 30, -30, 0, 60, 0]))
+    np.testing.assert_allclose(right.initial_qpos[:6], np.radians([-90, -30, 210, 0, -60, 0]))
     assert config["output"] == {"arm_smoothing_alpha": .3, "hand_smoothing_alpha": .5}
 
 

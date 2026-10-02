@@ -7,10 +7,12 @@ Run `.venv/bin/python scripts/run_crx_sharpa_joint_teleop.py` to use these defau
 Use `--backend preview` for preview or `--stop-gesture none` to disable the gesture.
 Pinch each thumb to its ring fingertip on both hands. The first bilateral
 candidate latches output immediately; holding for two seconds confirms exit.
-Releasing after the latch exits without resuming. ROS requires verified CRX
-`method=ruckig` and `ruckig_target_mode=waypoint`; other modes are rejected
-before any command publication. Additional usage and validation notes are
-retained locally in `../stop_gesture.md`, which is not tracked in Git.
+Releasing after the latch exits without resuming. ROS startup does not query or
+restrict the CRX interpolation method or target mode. The stop still sends one
+measured-position hold when feedback is valid; removing the mode restriction
+does not fix the previously observed stream-mode stop excursion. Additional
+usage and validation notes are retained locally in `../stop_gesture.md`, which
+is not tracked in Git.
 
 The CRX + Sharpa scene uses `configs/bimanual/crx5ia_sharpa_wave.yaml`.
 The hand-only scene uses `configs/bimanual/sharpa_wave.yaml`. Both use the same
@@ -89,6 +91,81 @@ interface and must not be used to calibrate real tracking scale. Demo mode
 keeps the configured hand-command smoothing. Quest keypoint markers now use a
 0.006 m default diameter in execution and replay viewers, including this scale
 preview. A viewer's `human_keypoint_size` setting can still override it.
+
+## Synthetic 20 cm vertical motion
+
+`run_crx_sharpa_vertical_demo.py` replaces Quest input with synchronized synthetic
+hands while reusing the CRX + Sharpa mapping, two solver processes (30 ms per
+side), output smoothing and ROS backend. It moves both wrist targets along
+robot world Z: **start → 20 cm above start → start**, with fixed wrist orientation.
+Each cycle takes 8 seconds; the default is 3 cycles. A quintic trajectory gives
+zero target velocity and acceleration at the top and bottom.
+
+Preview requires no Quest or ROS and starts from the configured robot pose:
+
+```bash
+env -u PYTHONPATH .venv/bin/python scripts/run_crx_sharpa_vertical_demo.py \
+  --backend preview --stroke-m 0.20 --period 8 --cycles 3
+```
+
+Open `http://localhost:9219`, or add `--no-viewer` for headless execution.
+For ROS, first start both drivers in the intended ROS domain, then run:
+
+```bash
+.venv/bin/python scripts/run_crx_sharpa_vertical_demo.py \
+  --backend ros --stroke-m 0.20 --period 8 --cycles 3 \
+  --command-hz 20 --publish-hz 100 --interpolation-horizon-ms 50
+```
+
+ROS calibrates the wrist origins and orientations from fresh measured joints;
+the motion clock starts after calibration. It does not issue a home command.
+The fixed finger gesture is generated from the models' initial open-hand poses,
+so hands starting in another gesture can move toward that gesture. Both hand
+command channels remain active. This does not freeze measured finger joints.
+
+Retargeting output uses **linear interpolation**, with a 50 ms horizon and
+100 Hz publication; it does not select or change the CRX driver's downstream
+interpolator. Preview displays solved targets at 20 Hz. Existing smoothing and
+soft optimization objectives mean the Cartesian motion is approximate: offline
+validation from the configured pose measured about 19.7 cm wrist travel and
+7 mm maximum position error relative to the reference over one cycle.
+
+After the final cycle, the script continues submitting the start-position target
+until all measured joints are within `--tolerance-deg 2` of the solved command
+for `--hold-time 1` second. It fails if this cannot finish within
+`--settle-timeout 10` seconds. This joint tolerance does not guarantee an exact
+Cartesian endpoint or the original joint configuration. Preview only requires
+accepted endpoint targets for the hold. Tracking interruption aborts the demo;
+Ctrl+C stops new commands without a return move. No collision checking is added.
+
+The opt-in integration test launches isolated mock drivers on domain 192 with
+localhost discovery and no viewer. It uses CRX `method:=linear`, so it does not
+validate hardware or downstream Ruckig tuning:
+
+```bash
+# After sourcing ROS and the installed driver workspace:
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 SHARPA_VERTICAL_ROS_TEST=1 \
+  .venv/bin/python -m pytest tests/test_sharpa_vertical_demo_ros.py -q -s
+```
+
+The one-cycle mock run measured 100.1 Hz on all three command topics (908
+messages each), 178 solved targets with zero stale inputs, and left/right wrist
+travel of 0.1969/0.1970 m. The final maximum feedback-to-command joint error was
+0.000154 rad. Both solver processes and the ROS feedback thread exited cleanly.
+
+A subsequent hardware recording with downstream **Ruckig stream** showed repeated
+braking/reversal and an approximately 7.9-degree right J2 excursion after the
+final measured-hold message. The linear mock test did not cover this behavior.
+Evidence, offline reproduction and proposed fixes are recorded in the local
+`vertical-demo-recording-analysis-20260928.md`, which is not tracked in Git.
+Those fixes are not yet applied.
+The operator subsequently reported good hardware motion with
+`method:=ruckig ruckig_target_mode:=waypoint`. Waypoint avoids the stream mode's
+per-message velocity/acceleration estimation while retaining Ruckig limits and
+the current reference state during replanning. No new recording has yet been
+analyzed to quantify that improvement; launch defaults have not been changed here.
+
+## ROS mock and live input
 
 For an isolated ROS mock test, source ROS Jazzy and installed copies of both
 driver workspaces in each terminal. Start the Sharpa mock driver in one terminal:

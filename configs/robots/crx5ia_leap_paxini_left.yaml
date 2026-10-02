@@ -30,12 +30,13 @@ actuated_joints:
 - joint_13
 - joint_14
 - joint_15
+# ROS degrees: [0, 30, -30, 0, 60, 0]; same arm pose as CRX + Sharpa.
 initial_qpos:
 - 0
+- 0.5235987755982988
+- -0.5235987755982988
 - 0
-- 0
-- 0
-- -1.5707963267948966
+- 1.0471975511965976
 - 0
 - 0
 - 0.1

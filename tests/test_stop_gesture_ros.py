@@ -12,8 +12,11 @@ pytestmark = pytest.mark.skipif(os.environ.get('STOP_GESTURE_ROS_TEST') != '1',
                                 reason='Set STOP_GESTURE_ROS_TEST=1 in a sourced ROS environment')
 
 
-@pytest.mark.parametrize('mode,release', [('waypoint', False), ('waypoint', True), ('stream', False)])
-def test_mock_gesture_stop_and_preflight(monkeypatch, tmp_path, mode, release):
+@pytest.mark.parametrize('method,mode,release', [
+    ('ruckig', 'waypoint', False), ('ruckig', 'waypoint', True),
+    ('ruckig', 'stream', False), ('linear', 'stream', False),
+])
+def test_mock_gesture_stop_across_modes(monkeypatch, tmp_path, method, mode, release):
     monkeypatch.setenv('ROS_DOMAIN_ID', '194')
     monkeypatch.setenv('ROS_AUTOMATIC_DISCOVERY_RANGE', 'LOCALHOST')
     monkeypatch.setenv('ROS_STATIC_PEERS', '')
@@ -55,7 +58,7 @@ def test_mock_gesture_stop_and_preflight(monkeypatch, tmp_path, mode, release):
     flow.stop_observer = observe
     launches = [
         ['ros2', 'launch', 'dual_crx_control', 'dual_arm.launch.py', 'mock:=true',
-         'rviz:=false', 'method:=ruckig', f'ruckig_target_mode:={mode}', 'input_rate_hz:=100.0'],
+         'rviz:=false', f'method:={method}', f'ruckig_target_mode:={mode}', 'input_rate_hz:=100.0'],
         ['ros2', 'launch', 'dual_sharpa_wave', 'dual_sharpa.launch.py',
          'backend:=mock', 'use_rviz:=false', 'publish_rate_hz:=100.0'],
     ]
@@ -65,30 +68,24 @@ def test_mock_gesture_stop_and_preflight(monkeypatch, tmp_path, mode, release):
             logs.append(log)
             processes.append(subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
                                                start_new_session=True))
-        if mode == 'stream':
-            with pytest.raises(RuntimeError, match='requires CRX'):
-                flow.run()
-            time.sleep(.1)
-            assert all(not rows for rows in messages.values())
-        else:
-            flow.run()
-            time.sleep(.1)  # Drain the probe's DDS queue after backend shutdown.
-            assert flow.stop_gesture.state == ('EXIT_UNCONFIRMED' if release else 'EXIT_CONFIRMED')
-            assert flow.command_count == boundary['target_count'] == 5
-            b = flow.backend
-            assert b._publish_count == boundary['publications']
-            assert b._pending_target is None and b._stopped
-            for topic, key, size in zip(topics, ('arms', 'left_hand', 'right_hand'), (12, 22, 22)):
-                rows = messages[topic]
-                assert rows and all(len(m.position) == size for m in rows)
-                stamps = [m.header.stamp.sec*1_000_000_000+m.header.stamp.nanosec for m in rows]
-                assert max(stamps) <= boundary['stamp']
-                # Exactly one hold in addition to interpolation publications.
-                assert len(rows) == boundary['publications'] + 1
-                np.testing.assert_allclose(rows[-1].position, boundary['actual'][b.channels[key][1]])
-            print(f'{mode}, release={release}: {flow.stop_gesture.state}; '
-                  f'{boundary["publications"]} publications + one hold; '
-                  f'exit {time.monotonic()-boundary["at"]:.3f}s after latch')
+        flow.run()
+        time.sleep(.1)  # Drain the probe's DDS queue after backend shutdown.
+        assert flow.stop_gesture.state == ('EXIT_UNCONFIRMED' if release else 'EXIT_CONFIRMED')
+        assert flow.command_count == boundary['target_count'] == 5
+        b = flow.backend
+        assert b._publish_count == boundary['publications']
+        assert b._pending_target is None and b._stopped
+        for topic, key, size in zip(topics, ('arms', 'left_hand', 'right_hand'), (12, 22, 22)):
+            rows = messages[topic]
+            assert rows and all(len(m.position) == size for m in rows)
+            stamps = [m.header.stamp.sec*1_000_000_000+m.header.stamp.nanosec for m in rows]
+            assert max(stamps) <= boundary['stamp']
+            # Exactly one hold in addition to interpolation publications.
+            assert len(rows) == boundary['publications'] + 1
+            np.testing.assert_allclose(rows[-1].position, boundary['actual'][b.channels[key][1]])
+        print(f'{method}/{mode}, release={release}: {flow.stop_gesture.state}; '
+              f'{boundary["publications"]} publications + one hold; '
+              f'exit {time.monotonic()-boundary["at"]:.3f}s after latch')
     finally:
         try:
             flow.close()

@@ -63,7 +63,7 @@ def build_flow(args, *, with_arms, source=None):
             startup_timeout=args.startup_timeout, target_timeout=flow.timeout,
             publish_hz=publish_hz, interpolation_horizon=horizon,
             crx_namespace=args.crx_namespace, sharpa_namespace=args.sharpa_namespace,
-            require_waypoint=gesture != 'none',
+            strict_stop=gesture != 'none',
         )
     return flow, config
 

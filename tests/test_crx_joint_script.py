@@ -173,6 +173,16 @@ def test_flow_composition_keeps_measured_seed_and_arm_filtering(monkeypatch):
     args = NS(command_hz=20.0, duration=1.0, serial='test-headset', viewer=True, viewer_port=9219,
               publish_hz=100., output_interpolation='cubic', interpolation_horizon_ms=50.)
     flow, config = script.build_flow(args)  # Actual configs/models, but no source.open() or ROS.
+    expected_arms = np.radians([0, 30, -30, 0, 60, 0, -90, -30, 210, 0, -60, 0])
+    np.testing.assert_allclose(flow.initial_qpos[script.ARM_INDICES], expected_arms)
+    from retargeting.config import load_robot_config
+    for side, retargeter in zip(('left', 'right'), (
+            flow.pipeline.left_retargeter, flow.pipeline.right_retargeter)):
+        sharpa = load_robot_config(f'configs/robots/crx5ia_sharpa_wave_{side}.yaml')
+        np.testing.assert_allclose(retargeter.qpos_init[:6], sharpa.initial_qpos[:6])
+        limits = retargeter.optimizer.joint_limits
+        assert np.all(retargeter.qpos_init >= limits[:, 0])
+        assert np.all(retargeter.qpos_init <= limits[:, 1])
     assert config['viewer']['enabled'] and config['viewer']['port'] == 9219
     assert not config['viewer']['wait_for_client']
     assert flow.backend is None
@@ -218,6 +228,27 @@ def test_flow_composition_keeps_measured_seed_and_arm_filtering(monkeypatch):
     assert len(commands) == 1
 
 
+def test_preview_solves_from_configured_pose_without_ros(monkeypatch):
+    from teleoperation.inputs.synthetic_hand import SyntheticBimanualInput
+
+    monkeypatch.setattr(script, 'JointConnection',
+                        lambda *a, **kw: pytest.fail('Preview must not connect to ROS'))
+    args = NS(backend='preview', command_hz=20., duration=0., serial=None,
+              viewer=False, viewer_port=9219, publish_hz=100.,
+              output_interpolation='cubic', interpolation_horizon_ms=50.)
+    flow, _ = script.build_flow(args)
+    assert flow.backend_factory is None and flow.backend is None
+    flow.source = SyntheticBimanualInput(frames=2, max_age_s=10.)
+    try:
+        flow.source.open()
+        for _ in range(2):
+            result = flow.step(flow.source.read())
+            assert result is not None and np.isfinite(result.qpos).all()
+        assert flow.command_count == 2 and flow.backend is None
+    finally:
+        flow.close()
+
+
 @pytest.mark.parametrize('failure', [None, KeyboardInterrupt(), RuntimeError('source failed')])
 def test_script_starts_viewer_and_closes_it_on_exit(monkeypatch, failure):
     from retargeting_apps.visualization.execution import manager
@@ -233,6 +264,7 @@ def test_script_starts_viewer_and_closes_it_on_exit(monkeypatch, failure):
 
     def build(args):
         assert args.viewer is True
+        assert args.backend == 'ros'
         return flow, {'viewer': {'enabled': args.viewer, 'port': args.viewer_port}}
 
     def create(config, actual_flow):
@@ -246,19 +278,21 @@ def test_script_starts_viewer_and_closes_it_on_exit(monkeypatch, failure):
     assert events == ['viewer', 'run', 'close']
 
 
-def test_script_no_viewer_never_constructs_visualizer(monkeypatch):
+@pytest.mark.parametrize('backend', ['preview', 'ros'])
+def test_script_no_viewer_never_constructs_visualizer(monkeypatch, backend):
     from retargeting_apps.visualization.execution import manager
 
     ran = []
 
     def build(args):
         assert args.viewer is False
+        assert args.backend == backend
         return NS(run=lambda: ran.append(True)), {}
 
     monkeypatch.setattr(script, 'build_flow', build)
     monkeypatch.setattr(manager, 'create_optional_execution_visualizer',
                         lambda *args: pytest.fail('headless script must not create a viewer'))
-    assert script.main(['--no-viewer']) == 0
+    assert script.main(['--no-viewer', '--backend', backend]) == 0
     assert ran == [True]
 
 

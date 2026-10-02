@@ -59,7 +59,7 @@ def test_source_fk_and_joint_contract(crx):
     config, model, adaptor = crx
     assert model.dof == 22
     assert list(config.actuated_joints) == [f"J{i}" for i in range(1, 7)] + [f"joint_{i}" for i in range(16)]
-    np.testing.assert_allclose(np.rad2deg(config.initial_qpos[:6]), [-90, 0, 180, 0, 90, 0])
+    np.testing.assert_allclose(np.rad2deg(config.initial_qpos[:6]), [-90, -30, 210, 0, -60, 0])
     limits = model.joint_limits[adaptor.actuated_joints_model_idx][:6]
     np.testing.assert_allclose(np.rad2deg(limits),
                                [[-200, 200], [-179.9, 179.9], [-68, 248],

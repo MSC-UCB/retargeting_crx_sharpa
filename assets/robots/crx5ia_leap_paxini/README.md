@@ -7,11 +7,10 @@ there is no CRX MJCF, dynamics, collision-aware planner, or hardware adapter.
 ## Frames and initialization
 
 The default `world -> base_link` transform is identity. CRX geometry is not
-mirrored or modified for the right side. Initial arm joints follow
-`dual_crx_ros2/src/dual_crx_bringup/config/mock_initial_positions.yaml`
-and SRDF right-arm home at commit `dad54b1`. The current physical-test initial
-pose is **`[-90, 0, 180, 0, 90, 0]` degrees**. This replaces the earlier
-temporary J6 +180-degree adjustment; J6 remains within its source limits of
+mirrored or modified for the right side. The configured arm initial pose is
+**`[-90, -30, 210, 0, -60, 0]` in ROS / URDF degrees**, matching CRX + Sharpa
+and `dual_crx_control/config/initial_pose.yaml`. It replaces the earlier
+`[-90, 0, 180, 0, 90, 0]` home. J6 remains within its source limits of
 [-225, 225] degrees.
 This is a model initialization, not a
 measurement or command to the physical robot. LEAP initial joints follow

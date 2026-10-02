@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Quest retargeting into a namespaced generic JointState target topic."""
+"""Run CRX Quest retargeting in local preview or through ROS JointState targets."""
 
 import argparse
 from dataclasses import replace
@@ -331,6 +331,9 @@ def build_flow(args):
     from teleoperation.config import load_teleoperation_mode_config
     from teleoperation.output import QposOutputFilter
 
+    backend = getattr(args, 'backend', 'ros')
+    if backend not in ('preview', 'ros'):
+        raise ValueError('backend must be preview or ros')
     config = compose_hydra_base_config([
         'app=teleop_exe', 'teleoperation_modes=bimanual_quest', 'backends=kinematic'])
     config['backend']['command_hz'] = args.command_hz
@@ -338,7 +341,7 @@ def build_flow(args):
     config['input']['serial'] = args.serial
     config['viewer'].update(enabled=args.viewer, port=args.viewer_port, wait_for_client=False)
     flow = build_bimanual_execution_flow(config)
-    if args.publish_hz is not None:
+    if backend == 'ros' and args.publish_hz is not None:
         horizon = (flow.period if args.interpolation_horizon_ms is None else
                    args.interpolation_horizon_ms / 1000.0)
         if horizon >= flow.timeout:
@@ -352,17 +355,20 @@ def build_flow(args):
         'arm_smoothing_alpha', mode.output.smoothing_alpha))
     mode = replace(mode, output=replace(mode.output, smoothing_alpha=alpha))
     flow.arm_output_filters = tuple(QposOutputFilter(r.qpos_init[:6], mode) for r in retargeters)
-    flow.backend_factory = lambda: JointConnection(
-        flow.initial_qpos, flow.period, publish_hz=args.publish_hz,
-        output_interpolation=args.output_interpolation,
-        interpolation_horizon=(None if args.interpolation_horizon_ms is None else
-                               args.interpolation_horizon_ms / 1000.0),
-        target_timeout=flow.timeout, namespace=getattr(args, 'namespace', 'crx5ia'))
+    if backend == 'ros':
+        flow.backend_factory = lambda: JointConnection(
+            flow.initial_qpos, flow.period, publish_hz=args.publish_hz,
+            output_interpolation=args.output_interpolation,
+            interpolation_horizon=(None if args.interpolation_horizon_ms is None else
+                                   args.interpolation_horizon_ms / 1000.0),
+            target_timeout=flow.timeout, namespace=getattr(args, 'namespace', 'crx5ia'))
     return flow, config
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--backend', choices=('preview', 'ros'), default='ros',
+                        help='preview uses no ROS; ros publishes joint targets (default: ros)')
     parser.add_argument('--namespace', default='crx5ia',
                         help='ROS namespace for joint_targets and joint_states (default: crx5ia)')
     parser.add_argument('--command-hz', type=float, default=20.0, help='Maximum target rate (default: 20)')
@@ -401,7 +407,9 @@ def main(argv=None):
             from retargeting_apps.visualization.execution.manager import create_optional_execution_visualizer
 
             visualizer = create_optional_execution_visualizer(config, flow)
-        print(f'Quest joint teleoperation -> /{args.namespace.strip("/") or "crx5ia"}/joint_targets; both arms, no LEAP output.', flush=True)
+        output = (f'/{args.namespace.strip("/") or "crx5ia"}/joint_targets'
+                  if args.backend == 'ros' else 'local preview (no ROS output)')
+        print(f'Quest joint teleoperation -> {output}; both arms, no LEAP output.', flush=True)
         flow.run()
     except KeyboardInterrupt:
         return 0

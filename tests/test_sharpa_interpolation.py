@@ -192,7 +192,7 @@ def test_interpolator_keeps_configured_dimension_for_future_targets(size):
 
 def test_gesture_stop_is_final_and_holds_only_once(timed_backend):
     b, now = timed_backend
-    b._require_waypoint = True
+    b._strict_stop = True
     b.execute(np.ones(b._size))
     b.request_stop('gesture')
     b.request_stop('gesture again')
@@ -213,7 +213,7 @@ def test_unverified_startup_cleanup_cannot_publish_hold(timed_backend):
 
 def test_failed_gesture_hold_still_revokes_pending_output(timed_backend):
     b, now = timed_backend
-    b._require_waypoint = True
+    b._strict_stop = True
     b.execute(np.ones(b._size))
     b._feedback['right_hand']['error'] = 'feedback lost'
     with pytest.raises(RuntimeError, match='feedback lost'):
@@ -229,7 +229,7 @@ def test_stop_from_another_thread_discards_sample_in_flight(timed_backend):
     import threading
 
     b, now = timed_backend
-    b._require_waypoint = True
+    b._strict_stop = True
     b.execute(np.ones(b._size))
     sampling, release = threading.Event(), threading.Event()
     sample = b._interpolator.sample

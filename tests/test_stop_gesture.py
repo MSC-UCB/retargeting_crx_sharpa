@@ -191,7 +191,7 @@ def test_composition_only_live_quest_and_arms(monkeypatch):
     flow,_=build_flow(args,with_arms=True)
     try:
         assert flow.stop_gesture.config.hold_s==2
-        assert flow.backend_factory().require_waypoint
+        assert flow.backend_factory().strict_stop
     finally:flow.close()
     with pytest.raises(ValueError,match='live Quest'):build_flow(args,with_arms=True,source=SyntheticBimanualInput())
     with pytest.raises(ValueError,match='live Quest'):build_flow(args,with_arms=False)

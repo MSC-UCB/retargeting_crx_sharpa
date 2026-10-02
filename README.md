@@ -56,6 +56,11 @@ For a virtual Sharpa preview, follow the steps below. Preview updates at the
 solver rate; the 100 Hz publisher runs in ROS mode. See the
 [Sharpa Wave guide](docs/sharpa-wave.md) for topic-frequency checks and configuration.
 
+For a finite **20 cm up/down demo without Quest**, use
+[`scripts/run_crx_sharpa_vertical_demo.py`](scripts/run_crx_sharpa_vertical_demo.py).
+It defaults to preview and also supports `--backend ros`; see the
+[vertical motion guide](docs/sharpa-wave.md#synthetic-20-cm-vertical-motion).
+
 ### 1. Connect Quest 3
 
 Enable developer mode and hand tracking on the headset, connect it by USB, and
@@ -265,8 +270,20 @@ poses. Finger poses remain placeholders because this script does not control han
 
 Optional arguments: `--serial <adb-serial>` and `--duration 60` (seconds after
 calibration; default 0 runs until Ctrl+C). `--help` does not start ROS, Quest, or a viewer.
+Choose `--backend ros` (default, preserving existing commands) or `--backend preview`.
+Preview uses Quest input and the local solver/viewer without creating ROS connections:
+
+```bash
+env -u PYTHONPATH .venv/bin/python scripts/run_crx_joint_teleop.py \
+  --backend preview --command-hz 20
+```
+
+Preview updates at the solver rate. `--namespace`, `--publish-hz`,
+`--output-interpolation` and `--interpolation-horizon-ms` configure ROS output
+and have no effect on preview motion. Use `--no-viewer` for headless execution.
+
 Use a Python 3.12 virtual environment compatible with Jazzy and retain ROS's
-`PYTHONPATH` for this command. The script uses the existing model/profile settings
+`PYTHONPATH` for the ROS backend. The script uses the existing model/profile settings
 and arm smoothing alpha (default 0.3) without changing the registered backends.
 
 To keep IK at approximately 20 Hz while publishing interpolated commands at
@@ -285,6 +302,11 @@ ros2 launch dual_crx_control dual_arm.launch.py \
 
 `--publish-hz` enables an independent steady-clock publisher in the existing ROS
 executor thread. Omit it to retain direct publication at the IK target rate.
+This entrypoint uses the CRX + LEAP profiles internally, with hand output disabled.
+Their arm initial poses match CRX + Sharpa and dual_crx's `initial_pose.yaml`:
+left `[0, 30, -30, 0, 60, 0]`, right `[-90, -30, 210, 0, -60, 0]` in ROS degrees.
+The viewer initially shows these configured poses, then displays measured feedback
+when execution results arrive. Starting this script does not move the arms home.
 `--output-interpolation` accepts `linear` or `cubic` (default `cubic`). The horizon
 defaults to `1000 / command-hz` milliseconds, not the faster publish period.
 It must be shorter than the flow's target timeout (normally 250 ms). An IK
@@ -425,7 +447,7 @@ LEAP-equipped CRX arms and remains supported for existing commands.
 | Setting | Left | Right |
 | --- | --- | --- |
 | Robot config | `configs/robots/crx5ia_leap_paxini_left.yaml` | `configs/robots/crx5ia_leap_paxini.yaml` |
-| Arm initial joints (rad) | `[0, 0, 0, 0, -pi/2, 0]` | `[-pi/2, 0, pi, 0, pi/2, 0]` |
+| Arm initial joints (ROS degrees) | `[0, 30, -30, 0, 60, 0]` | `[-90, -30, 210, 0, -60, 0]` |
 | Base position (m) | `[0, 0.3, 0]` | `[0, -0.3, 0]` |
 | Base RPY (rad) | `[0, 0, 0]` | `[0, 0, -pi/2]` |
 

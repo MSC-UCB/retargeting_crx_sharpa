@@ -197,7 +197,7 @@ def test_cleanup_failure_still_closes_other_ros_resources(backend):
 
 
 def test_gesture_does_not_report_success_after_executor_failure(backend):
-    backend._require_waypoint = True
+    backend._strict_stop = True
     backend._stopped = True
     backend._spin_error = 'executor failed'
     with pytest.raises(RuntimeError, match='executor failed'):
