@@ -118,7 +118,7 @@ def test_bimanual_leap_config_uses_left_dual_crx_home_and_22_dof_each():
     assert len(left.actuated_joints) == len(right.actuated_joints) == 22
     np.testing.assert_allclose(left.initial_qpos[:6], [0.0, 0.0, 0.0, 0.0, -np.pi / 2, 0.0])
     np.testing.assert_allclose(right.initial_qpos[:6], [-np.pi / 2, 0.0, np.pi, 0.0, np.pi / 2, 0.0])
-    assert config["output"] == {"arm_smoothing_alpha": .5, "hand_smoothing_alpha": .3}
+    assert config["output"] == {"arm_smoothing_alpha": .3, "hand_smoothing_alpha": .5}
 
 
 @pytest.mark.parametrize("backend", ["kinematic", "dual_crx"])
@@ -139,8 +139,8 @@ def test_unified_bimanual_composition_is_device_free_and_uses_backend_frequency(
     assert not config["viewer"]["wait_for_client"]
     if backend == "dual_crx":
         assert flow.backend_factory is not None
-        assert [f.mode_config.output.smoothing_alpha for f in flow.arm_output_filters] == [.5, .5]
-        assert [f.mode_config.output.smoothing_alpha for f in flow.hand_output_filters] == [.3, .3]
+        assert [f.mode_config.output.smoothing_alpha for f in flow.arm_output_filters] == [.3, .3]
+        assert [f.mode_config.output.smoothing_alpha for f in flow.hand_output_filters] == [.5, .5]
     else:
         assert flow.backend_factory is None
 

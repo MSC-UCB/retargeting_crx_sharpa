@@ -180,7 +180,7 @@ def test_flow_composition_keeps_measured_seed_and_arm_filtering(monkeypatch):
     assert flow.hand_output_filters is None
     assert len(flow.arm_output_filters) == 2
     assert all(f.mode_config.output.smooth_output_qpos for f in flow.arm_output_filters)
-    assert all(f.mode_config.output.smoothing_alpha == 0.5 for f in flow.arm_output_filters)
+    assert all(f.mode_config.output.smoothing_alpha == 0.3 for f in flow.arm_output_filters)
     measured = np.full(44, 0.12)
     commands, seeds = [], []
     link = NS(get_joint_pos=lambda: measured.copy(), execute=lambda q: commands.append(q.copy()))
@@ -212,8 +212,8 @@ def test_flow_composition_keeps_measured_seed_and_arm_filtering(monkeypatch):
     assert not commands
     flow.step(sample(2))
     np.testing.assert_allclose(seeds, np.full((2, 22), 0.12))
-    np.testing.assert_allclose(commands[0][:6], 0.5 * 1. + 0.5 * 0.12)
-    np.testing.assert_allclose(commands[0][22:28], 0.5 * -1. + 0.5 * 0.12)
+    np.testing.assert_allclose(commands[0][:6], 0.3 * 1. + 0.7 * 0.12)
+    np.testing.assert_allclose(commands[0][22:28], 0.3 * -1. + 0.7 * 0.12)
     flow.step(sample(2))
     assert len(commands) == 1
 

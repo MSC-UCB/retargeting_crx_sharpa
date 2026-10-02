@@ -1,6 +1,6 @@
 # 雙手拇指與無名指捏合：停止手勢
 
-已實作於 `scripts/run_crx_sharpa_joint_teleop.py`，需明確啟用，預設仍為 `none`。支援 live Quest 雙手輸入的 preview／ROS backend，以及 `--no-viewer`；hand-only、synthetic CLI 與 vertical demo 不提供此功能。
+Enabled by default in `scripts/run_crx_sharpa_joint_teleop.py` with a 2-second confirmation hold. Supports live Quest input with preview/ROS backends and `--no-viewer`. Use `--stop-gesture none` to disable it; synthetic CLI input requires this override. Hand-only and vertical demo modes do not provide this gesture.
 
 ## 操作方式
 

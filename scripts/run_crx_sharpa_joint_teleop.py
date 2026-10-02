@@ -1,4 +1,4 @@
-"""Run both CRX arms and Sharpa hands; select --backend ros for ROS output."""
+"""Run CRX arms and Sharpa hands with ROS output and the dual-hand stop gesture."""
 
 from retargeting_apps.sharpa_teleop import main
 

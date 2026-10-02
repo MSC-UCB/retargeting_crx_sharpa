@@ -2,8 +2,8 @@
 
 ## Quick Start: Quest 3 + Dual CRX + Sharpa Wave
 
-**Run live hand tracking with two CRX arms and two Sharpa Wave hands in the
-virtual preview.** Run the commands below from the repository root in WSL/Linux.
+**Use Quest hand tracking with CRX arms, Sharpa Wave hands, or both through ROS
+control or virtual preview.** Run the commands below from the repository root in WSL/Linux.
 Complete [Install and Test](#install-and-test) first if `.venv` is not ready.
 
 ### Choose a ROS control mode (100 Hz)
@@ -32,16 +32,22 @@ Connect Quest as described below, then run **one** of these commands.
 **Dual CRX arms + dual Sharpa hands (56 joints):**
 
 ```bash
-.venv/bin/python scripts/run_crx_sharpa_joint_teleop.py \
-  --backend ros --command-hz 20 --publish-hz 100 --interpolation-horizon-ms 50
+.venv/bin/python scripts/run_crx_sharpa_joint_teleop.py
 ```
+
+The combined script defaults to `--backend ros --command-hz 20 --publish-hz 100
+--interpolation-horizon-ms 50 --stop-gesture dual-thumb-ring-pinch
+--stop-gesture-hold-s 2`. All options remain overridable. The first bilateral
+thumb-to-ring pinch latches output immediately; holding for 2 seconds confirms
+exit. Use `--stop-gesture none` to disable it or `--backend preview` for preview.
 
 These commands request 20 Hz solving and independent 100 Hz ROS publication,
 with a 50 ms interpolation horizon. The arms-only command uses cubic
 interpolation; both Sharpa entrypoints use linear interpolation by default.
 Configure the CRX driver with `input_rate_hz:=100.0`; Sharpa uses its 100 Hz
-driver update rate. Existing output smoothing is retained. The Sharpa modes
-keep arm smoothing at 0.5, hand smoothing at 0.3, and joint speed limiting disabled.
+driver update rate. Output smoothing follows the selected `configs/bimanual/`
+profile: arm alpha 0.3 and hand alpha 0.5. Joint speed limiting remains disabled
+in the Sharpa profiles.
 Both Sharpa entrypoints solve the left and right sides in two persistent processes,
 with a 30 ms NLopt time budget per side. Worker startup precedes input acquisition;
 the flow owns cancellation and process cleanup. Command and publication rates are unchanged.
@@ -261,7 +267,7 @@ Optional arguments: `--serial <adb-serial>` and `--duration 60` (seconds after
 calibration; default 0 runs until Ctrl+C). `--help` does not start ROS, Quest, or a viewer.
 Use a Python 3.12 virtual environment compatible with Jazzy and retain ROS's
 `PYTHONPATH` for this command. The script uses the existing model/profile settings
-and arm smoothing alpha (default 0.5) without changing the registered backends.
+and arm smoothing alpha (default 0.3) without changing the registered backends.
 
 To keep IK at approximately 20 Hz while publishing interpolated commands at
 100 Hz, use the updated ws_fanuc bridge and match its expected input rate:
@@ -358,8 +364,8 @@ for their existing workflows. Gateway controller frequency and limits are
 separate from retargeting target frequency. Lease heartbeats and startup holds
 are lifecycle messages, not extra solved input frames.
 
-Physical commands use first-order low-pass smoothing with **alpha=0.5 for
-arms and alpha=0.3 for hands**. Values live in
+Physical commands use first-order low-pass smoothing with **alpha=0.3 for
+arms and alpha=0.5 for hands**. Values live in
 `configs/bimanual/crx5ia_coact_leap.yaml` under `output.arm_smoothing_alpha` and
 `output.hand_smoothing_alpha`. The formula is
 `q = alpha * target + (1 - alpha) * previous_command`. This filter changes the

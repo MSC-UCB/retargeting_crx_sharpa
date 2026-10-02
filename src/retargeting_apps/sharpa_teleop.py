@@ -70,8 +70,9 @@ def build_flow(args, *, with_arms, source=None):
 
 def main(argv=None, *, with_arms=True):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--backend', choices=('preview', 'ros'), default='preview',
-                        help='preview uses no ROS; ros publishes to already running drivers')
+    parser.add_argument('--backend', choices=('preview', 'ros'), default='ros' if with_arms else 'preview',
+                        help='preview uses no ROS; ros publishes to already running drivers '
+                             '(default: ros for CRX + Sharpa, preview for hands only)')
     parser.add_argument('--config', default=None, help='Optional bimanual YAML')
     parser.add_argument('--adb', default=None, help='ADB executable; defaults to PATH discovery')
     parser.add_argument('--serial', default=None)
@@ -80,16 +81,19 @@ def main(argv=None, *, with_arms=True):
     parser.add_argument('--command-hz', type=float, default=20.)
     parser.add_argument('--publish-hz', type=float, default=100.,
                         help='ROS linear-interpolation publication rate; independent of solving (default: 100)')
-    parser.add_argument('--interpolation-horizon-ms', type=float, default=None,
-                        help='ROS interpolation duration; defaults to 1000 / command-hz, normally 50 ms')
+    parser.add_argument('--interpolation-horizon-ms', type=float, default=50. if with_arms else None,
+                        help='ROS interpolation duration; defaults to 50 ms for CRX + Sharpa, '
+                             '1000 / command-hz for hands only')
     parser.add_argument('--duration', type=float, default=0., help='Seconds after initialization; 0 is unlimited')
     parser.add_argument('--startup-timeout', type=float, default=5.)
     parser.add_argument('--crx-namespace', default='crx5ia')
     parser.add_argument('--sharpa-namespace', default='sharpa')
     parser.add_argument('--synthetic-frames', type=int, default=None,
                         help='Explicit finite smoke input instead of opening Quest (use ROS mock only)')
-    parser.add_argument('--stop-gesture', choices=('none', 'dual-thumb-ring-pinch'), default='none',
-                        help='Opt-in latched stop; live CRX + Sharpa Quest only, ROS requires Ruckig waypoint')
+    parser.add_argument('--stop-gesture', choices=('none', 'dual-thumb-ring-pinch'),
+                        default='dual-thumb-ring-pinch' if with_arms else 'none',
+                        help='Latched stop; enabled by default for live CRX + Sharpa Quest. '
+                             'Use none to disable, including for synthetic input')
     parser.add_argument('--stop-gesture-hold-s', type=float, default=2.,
                         help='Fresh bilateral pinch confirmation duration after output is latched (default: 2)')
     args = parser.parse_args(argv)

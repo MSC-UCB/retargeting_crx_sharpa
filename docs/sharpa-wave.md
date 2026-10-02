@@ -1,7 +1,10 @@
 # Sharpa Wave preview and mock validation
 
-The CRX + Sharpa live Quest entrypoint supports an opt-in stop gesture:
-add `--stop-gesture dual-thumb-ring-pinch --stop-gesture-hold-s 2`.
+The CRX + Sharpa live Quest entrypoint defaults to ROS output, 20 Hz solving,
+100 Hz publication, a fixed 50 ms interpolation horizon, and
+`--stop-gesture dual-thumb-ring-pinch --stop-gesture-hold-s 2`.
+Run `.venv/bin/python scripts/run_crx_sharpa_joint_teleop.py` to use these defaults.
+Use `--backend preview` for preview or `--stop-gesture none` to disable the gesture.
 Pinch each thumb to its ring fingertip on both hands. The first bilateral
 candidate latches output immediately; holding for two seconds confirms exit.
 Releasing after the latch exits without resuming. ROS requires verified CRX
@@ -108,7 +111,7 @@ with the same sourced ROS environment and domain:
 
 ```bash
 .venv/bin/python scripts/run_sharpa_joint_teleop.py --backend ros --no-viewer --synthetic-frames 100
-.venv/bin/python scripts/run_crx_sharpa_joint_teleop.py --backend ros --no-viewer --synthetic-frames 100
+.venv/bin/python scripts/run_crx_sharpa_joint_teleop.py --backend ros --no-viewer --synthetic-frames 100 --stop-gesture none
 ```
 
 Run the two commands separately. The first requires only Sharpa feedback; the
@@ -126,7 +129,8 @@ Quest input after starting the mock drivers:
 For hands only, use `scripts/run_sharpa_joint_teleop.py` with the same options.
 `--publish-hz` and `--interpolation-horizon-ms` affect ROS output only; preview
 continues to show each solved, smoothed target. The default interpolation horizon
-is `1000 / command-hz` ms and must be shorter than the 250 ms target timeout.
+is fixed at 50 ms for CRX + Sharpa and is `1000 / command-hz` ms for hands only.
+It must be shorter than the 250 ms target timeout.
 Smoothing runs once per solver target, not once per 100 Hz publication.
 
 An independent steady-clock ROS timer samples the complete 44- or 56-joint
@@ -167,7 +171,7 @@ seed, waits for both matching results, and then applies the existing output poli
 This is not a fixed 60 ms wait, nor a hard 30 ms end-to-end deadline.
 A solve that exceeds the input freshness threshold
 (150 ms by default) can still cause a frame to be dropped. The Sharpa defaults
-apply output smoothing (arm alpha 0.5, hand alpha 0.3) in preview and ROS modes,
+apply output smoothing (arm alpha 0.3, hand alpha 0.5) in preview and ROS modes,
 without retargeting-side joint speed limiting. Smoothing is enabled independently
 with `output.smooth_output_qpos`; `output.limit_joint_speed` defaults to false.
 The downstream controller owns velocity limiting. Model joint-position bounds still apply.

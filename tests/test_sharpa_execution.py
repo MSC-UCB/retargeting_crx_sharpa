@@ -120,8 +120,8 @@ def test_real_solver_smoothing_without_speed_cap_and_finite_input(with_arms, mon
             assert r.human_fingertip_indices.tolist() == [4, 8, 12, 16, 20]
             joints = flow.robot_slices[i]
             qpos = result.qpos[joints]
-            alpha = np.full(flow.robot_dofs[i], .3)
-            alpha[:flow.arm_dofs[i]] = .5
+            alpha = np.full(flow.robot_dofs[i], .5)
+            alpha[:flow.arm_dofs[i]] = .3
             expected = alpha * raw_results[-1][joints] + (1. - alpha) * previous[joints]
             np.testing.assert_allclose(qpos, expected, atol=1e-12)
             assert np.all(qpos >= r.optimizer.joint_limits[:, 0] - 1e-7)
@@ -209,6 +209,34 @@ def test_measured_56_dim_seed_pause_and_recovery(monkeypatch, request):
     assert len(calls) == 2
     np.testing.assert_array_equal(seeds[-1], measured)
     np.testing.assert_array_equal(calls[-1], result.qpos)
+
+
+@pytest.mark.parametrize('with_arms,overrides,expected', [
+    (True, [], ('ros', 20., 100., 50., 'dual-thumb-ring-pinch', 2.)),
+    (True, ['--command-hz', '40'], ('ros', 40., 100., 50., 'dual-thumb-ring-pinch', 2.)),
+    (False, [], ('preview', 20., 100., None, 'none', 2.)),
+    (True, ['--backend', 'preview', '--command-hz', '40', '--publish-hz', '80',
+            '--interpolation-horizon-ms', '25', '--stop-gesture', 'none',
+            '--stop-gesture-hold-s', '3'], ('preview', 40., 80., 25., 'none', 3.)),
+])
+def test_cli_defaults_and_overrides_without_devices(monkeypatch, with_arms, overrides, expected):
+    from retargeting_apps import sharpa_teleop
+
+    captured, events = {}, []
+    flow = NS(stop_gesture=None, run=lambda: events.append('run'),
+              close=lambda: events.append('close'))
+
+    def build(args, **kwargs):
+        captured.update(vars(args), **kwargs)
+        return flow, {}
+
+    monkeypatch.setattr(sharpa_teleop, 'build_flow', build)
+    assert sharpa_teleop.main(['--no-viewer', *overrides], with_arms=with_arms) == 0
+    assert tuple(captured[key] for key in (
+        'backend', 'command_hz', 'publish_hz', 'interpolation_horizon_ms',
+        'stop_gesture', 'stop_gesture_hold_s')) == expected
+    assert captured['with_arms'] == with_arms and captured['source'] is None
+    assert events == ['run', 'close']
 
 
 def test_cli_help_never_opens_devices():

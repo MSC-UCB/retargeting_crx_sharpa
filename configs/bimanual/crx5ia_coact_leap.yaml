@@ -22,5 +22,5 @@ input:
   port: 8765
   max_age_s: 0.15
 output:
-  arm_smoothing_alpha: 0.5
-  hand_smoothing_alpha: 0.3
+  arm_smoothing_alpha: 0.3
+  hand_smoothing_alpha: 0.5
