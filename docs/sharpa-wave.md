@@ -49,7 +49,7 @@ and flexion against FK for both hand-only and CRX-mounted models.
 From the repository root, inspect the initial scene without Quest or ROS:
 
 ```bash
-env -u PYTHONPATH .venv/bin/python scripts/view_bimanual_initial.py --config configs/bimanual/crx5ia_sharpa_wave.yaml
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/view_bimanual_initial.py --config configs/bimanual/crx5ia_sharpa_wave.yaml
 ```
 
 Open `http://localhost:9219` in the Windows browser. Inspect both bases,
@@ -60,7 +60,7 @@ With Quest connected and authorized in WSL (`adb devices -l`), run a virtual
 preview that publishes no robot commands:
 
 ```bash
-env -u PYTHONPATH .venv/bin/python scripts/run_crx_sharpa_joint_teleop.py --backend preview
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/run_crx_sharpa_joint_teleop.py --backend preview
 ```
 
 The hand-only equivalent is
@@ -73,7 +73,7 @@ To compare the Quest skeleton with the hand-only Sharpa meshes while tuning
 their input scales, run:
 
 ```bash
-env -u PYTHONPATH .venv/bin/python scripts/preview_sharpa_scale.py
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/preview_sharpa_scale.py
 ```
 
 Open `http://localhost:9219` and adjust the **Left Quest hand scale** and
@@ -104,7 +104,7 @@ zero target velocity and acceleration at the top and bottom.
 Preview requires no Quest or ROS and starts from the configured robot pose:
 
 ```bash
-env -u PYTHONPATH .venv/bin/python scripts/run_crx_sharpa_vertical_demo.py \
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/run_crx_sharpa_vertical_demo.py \
   --backend preview --stroke-m 0.20 --period 8 --cycles 3
 ```
 

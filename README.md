@@ -77,8 +77,19 @@ attachment to WSL; if it says `unauthorized`, accept the prompt in the headset.
 ### 2. Start the Sharpa preview
 
 ```bash
-env -u PYTHONPATH .venv/bin/python scripts/run_crx_sharpa_joint_teleop.py --backend preview
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/run_crx_sharpa_joint_teleop.py --backend preview
 ```
+
+> **Preview environment:** Calling `.venv/bin/python` selects the virtual
+> environment directly; activation with `source .venv/bin/activate` is optional.
+> Activating it does **not** clear inherited `PYTHONPATH` or `LD_LIBRARY_PATH`.
+> If your terminal has sourced ROS, use the full command above to prevent ROS's
+> Pinocchio/EigenPy libraries from mixing with the virtual environment. Clearing
+> only `PYTHONPATH` can cause `undefined symbol: EIGENPY_ARRAY_APIPyArray_RUNTIME_VERSION`;
+> leaving both variables set can cause a NumPy 1.x/2.x error or segmentation fault.
+> In a clean terminal without inherited ROS paths, the command also works without
+> the `env` prefix. These overrides apply only to this command; keep the sourced
+> ROS environment when running `--backend ros`.
 
 The application opens Quest Browser. Press **Start tracking** in the headset
 and keep both hands visible and steady until the terminal reports
@@ -94,7 +105,7 @@ Press **Ctrl+C** in the terminal to stop; restart the command to recalibrate.
 **Inspect the initial installation without Quest:**
 
 ```bash
-env -u PYTHONPATH .venv/bin/python scripts/view_bimanual_initial.py --config configs/bimanual/crx5ia_sharpa_wave.yaml
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/view_bimanual_initial.py --config configs/bimanual/crx5ia_sharpa_wave.yaml
 ```
 
 Open the same viewer URL, inspect the scene, then stop this process before
@@ -103,13 +114,13 @@ starting live tracking so port 9219 is available.
 **Track only the two Sharpa hands with fixed robot wrists:**
 
 ```bash
-env -u PYTHONPATH .venv/bin/python scripts/run_sharpa_joint_teleop.py --backend preview
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/run_sharpa_joint_teleop.py --backend preview
 ```
 
 **Adjust Quest hand scale against the Sharpa meshes (no ROS output):**
 
 ```bash
-env -u PYTHONPATH .venv/bin/python scripts/preview_sharpa_scale.py
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/preview_sharpa_scale.py
 ```
 
 Open `http://localhost:9219` and adjust the left and right hand scale sliders
@@ -176,7 +187,7 @@ only the invoked command; retain the sourced ROS environment for ROS execution.
 Retarget the bundled trajectory and save artifacts under `outputs/`:
 
 ```bash
-env -u PYTHONPATH .venv/bin/python -m retargeting_apps.main \
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python -m retargeting_apps.main \
   app=offline_retarget end=200 run_name=quickstart_leap
 ```
 
@@ -184,8 +195,8 @@ Add `post.visualize.enabled=true` to open the Viser viewer. To view saved result
 or compute benchmark statistics:
 
 ```bash
-env -u PYTHONPATH .venv/bin/python -m retargeting_apps.main app=replay run_name=quickstart_leap
-env -u PYTHONPATH .venv/bin/python -m retargeting_apps.main app=benchmark run_name=quickstart_leap
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python -m retargeting_apps.main app=replay run_name=quickstart_leap
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python -m retargeting_apps.main app=benchmark run_name=quickstart_leap
 ```
 
 ## Dual-Arm Quest Execution
@@ -197,7 +208,7 @@ needs a device access rule, use `scripts/install_quest_udev_rule.sh`.
 Preview both arms with a kinematic scene:
 
 ```bash
-env -u PYTHONPATH .venv/bin/python -m retargeting_apps.main app=teleop_exe \
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python -m retargeting_apps.main app=teleop_exe \
   teleoperation_modes=bimanual_quest viewer.enabled=true
 ```
 
@@ -207,7 +218,7 @@ uses no ROS backend. Set `input.serial=<adb-serial>` to select a headset.
 To view only the configured initial robot poses without starting Quest:
 
 ```bash
-env -u PYTHONPATH .venv/bin/python scripts/view_bimanual_initial.py
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/view_bimanual_initial.py
 ```
 
 For ROS output, first start your configured `dual_crx_ros2` gateway, then run:
@@ -281,7 +292,7 @@ Choose `--backend ros` (default, preserving existing commands) or `--backend pre
 Preview uses Quest input and the local solver/viewer without creating ROS connections:
 
 ```bash
-env -u PYTHONPATH .venv/bin/python scripts/run_crx_joint_teleop.py \
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/run_crx_joint_teleop.py \
   --backend preview --command-hz 20
 ```
 
@@ -363,7 +374,7 @@ Run the script's headless checks, or explicitly opt in to the isolated ROS mock
 test (domain 185, no Quest or physical hardware):
 
 ```bash
-env -u PYTHONPATH .venv/bin/python -m pytest tests/test_crx_joint_script.py tests/test_crx_joint_interpolation.py -q
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python -m pytest tests/test_crx_joint_script.py tests/test_crx_joint_interpolation.py -q
 # After sourcing ROS and ws_fanuc:
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 CRX_JOINT_ROS_TEST=1 \
   .venv/bin/python -m pytest tests/test_crx_joint_script.py -k ros_mock -q
