@@ -230,12 +230,15 @@ Leap hand hardware details are in [ws_ros2/src/leaphand_ros2_module/readme.md](.
 ### Local Test Environment
 
 Use a repository-local virtual environment created with system Python, without conda:
+For a new Linux user, clone into that user's own directory and create a fresh
+`.venv`; copied virtual environments retain paths to their original location.
 
 ```bash
+git submodule update --init --recursive
 /usr/bin/python3 -m venv .venv
-env -u PYTHONPATH .venv/bin/python -m pip install -e ".[dev,quest3]" pin scikit-learn
-env -u PYTHONPATH .venv/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-env -u PYTHONPATH .venv/bin/python -m pytest tests/test_bimanual_quest.py tests/test_bimanual_execution.py -q
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python -m pip install -e ".[dev,quest3]" pin scikit-learn
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python -m pytest tests/test_bimanual_quest.py tests/test_bimanual_execution.py -q
 ```
 
 On systems without `ensurepip`, create the environment without pip and bootstrap pip inside it:
@@ -243,15 +246,20 @@ On systems without `ensurepip`, create the environment without pip and bootstrap
 ```bash
 /usr/bin/python3 -m venv --without-pip .venv
 curl -fL https://bootstrap.pypa.io/get-pip.py -o /tmp/retargeting-crx-get-pip.py
-env -u PYTHONPATH .venv/bin/python /tmp/retargeting-crx-get-pip.py
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python /tmp/retargeting-crx-get-pip.py
 ```
 
 Then run the installation commands above. The `pin` distribution provides `pinocchio`;
 `scikit-learn` and CPU PyTorch are needed by the retargeter imports. These tests require
 no ROS installation, connected headset, viewer, or hardware. Optional simulation and
 viewer tests require their respective extras. `.venv/` is ignored by Git.
-The `env -u PYTHONPATH` prefix prevents inherited ROS paths from contaminating
-the standalone test environment; retain ROS paths when doing explicit ROS work.
+The `env -u PYTHONPATH -u LD_LIBRARY_PATH` prefix prevents inherited Python and
+native-library paths from contaminating the standalone test environment. Clearing
+only `PYTHONPATH` can still load ROS's `libeigenpy.so` instead of the virtualenv's
+version, causing Pinocchio imports to fail with
+`undefined symbol: EIGENPY_ARRAY_APIPyArray_RUNTIME_VERSION`. Use both overrides
+for headless checks in a ROS-sourced shell; retain ROS paths when doing explicit
+ROS work. The overrides affect only the invoked command.
 
 ### Package Boundaries
 

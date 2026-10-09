@@ -147,13 +147,16 @@ optional simulation workflows, with five additions for the CRX setup:
 
 Run commands from the repository root using system Python and a local virtual
 environment. Python 3.10+ is supported; ROS Jazzy integration uses Python 3.12.
+For a new Linux user, clone the repository into that user's own directory and
+create a new `.venv` there. Do not copy or reuse another user's virtual environment;
+its installed paths and file permissions belong to the original location/user.
 
 ```bash
 git submodule update --init --recursive
 /usr/bin/python3 -m venv .venv
-env -u PYTHONPATH .venv/bin/python -m pip install -e ".[dev,quest3,replay]" pin scikit-learn
-env -u PYTHONPATH .venv/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-env -u PYTHONPATH .venv/bin/python -m pytest tests/test_bimanual_quest.py tests/test_bimanual_execution.py -q
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python -m pip install -e ".[dev,quest3,replay]" pin scikit-learn
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python -m pytest tests/test_bimanual_quest.py tests/test_bimanual_execution.py -q
 ```
 
 If `venv` reports missing `ensurepip`, use the bootstrap instructions in
@@ -161,8 +164,12 @@ If `venv` reports missing `ensurepip`, use the bootstrap instructions in
 The `pin` distribution supplies Pinocchio. CPU PyTorch is sufficient for these
 headless tests. The `replay` extra includes Viser's URDF loader and the COLLADA
 loader needed by the CRX meshes. Optional MuJoCo workflows require `.[mujoco]` or `.[mujoco-web]`.
-The `env -u PYTHONPATH` prefix isolates offline commands from inherited ROS paths;
-omit it for ROS execution after sourcing the ROS environment.
+The `env -u PYTHONPATH -u LD_LIBRARY_PATH` prefix isolates these headless commands
+from inherited Python and native-library paths. Clearing only `PYTHONPATH` can
+still load ROS's `libeigenpy.so` into the pip-installed Pinocchio and fail with
+`undefined symbol: EIGENPY_ARRAY_APIPyArray_RUNTIME_VERSION`. Use the same prefix
+for offline commands below if your shell has sourced ROS. These overrides affect
+only the invoked command; retain the sourced ROS environment for ROS execution.
 
 ## Offline Replay
 
