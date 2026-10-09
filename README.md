@@ -14,6 +14,18 @@ use the same ROS domain as the drivers, and start the mock drivers first:
 [Sharpa hands / arms + hands setup](docs/sharpa-wave.md).
 Connect Quest as described below, then run **one** of these commands.
 
+**Dual CRX arms + dual Sharpa hands (56 joints): (Most General Use)**
+
+```bash
+.venv/bin/python scripts/run_crx_sharpa_joint_teleop.py --backend ros
+```
+
+If your terminal have import ros before, use this.
+
+```bash
+env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/run_crx_sharpa_joint_teleop.py --backend ros
+```
+
 **Dual CRX arms only (12 joints):**
 
 ```bash
@@ -27,12 +39,6 @@ Connect Quest as described below, then run **one** of these commands.
 ```bash
 .venv/bin/python scripts/run_sharpa_joint_teleop.py \
   --backend ros --command-hz 20 --publish-hz 100 --interpolation-horizon-ms 50
-```
-
-**Dual CRX arms + dual Sharpa hands (56 joints):**
-
-```bash
-.venv/bin/python scripts/run_crx_sharpa_joint_teleop.py
 ```
 
 The combined script defaults to `--backend ros --command-hz 20 --publish-hz 100
