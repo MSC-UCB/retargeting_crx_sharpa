@@ -20,11 +20,18 @@ Connect Quest as described below, then run **one** of these commands.
 .venv/bin/python scripts/run_crx_sharpa_joint_teleop.py --backend ros
 ```
 
-If your terminal have import ros before, use this.
+In each new Bash terminal, activate the project environment before running ROS:
 
 ```bash
-env -u PYTHONPATH -u LD_LIBRARY_PATH .venv/bin/python scripts/run_crx_sharpa_joint_teleop.py --backend ros
+source scripts/activate_ros.sh
+python scripts/run_crx_sharpa_joint_teleop.py --backend ros
 ```
+
+The helper sources ROS Jazzy and `~/ws_fanuc/install/setup.bash`, activates this
+repo's Python 3.12 `.venv`, and prioritizes its Pinocchio libraries while retaining
+ROS imports. It preserves `ROS_DOMAIN_ID`, defaulting to 87 when unset; use the
+same domain as the drivers. It does not start drivers. Do not clear `PYTHONPATH`
+or `LD_LIBRARY_PATH` when running the ROS backend after activation.
 
 **Dual CRX arms only (12 joints):**
 
